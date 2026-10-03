@@ -1,0 +1,50 @@
+{"id": "int-01", "category": "interested", "subject": "Re: phishing simulations", "body": "Hi, this sounds relevant. We're reviewing our awareness program this quarter. Can you send pricing for around 400 staff?"}
+{"id": "int-02", "category": "interested", "subject": "Re: audit evidence", "body": "Happy to have a quick chat. What does your week look like?"}
+{"id": "int-03", "category": "interested", "subject": "Re: training completion", "body": "Yes, interested. Could you show me how the completion reporting works? A demo would help."}
+{"id": "int-04", "category": "interested", "subject": "Re: quick call", "body": "The Wednesday slot works for me.", "offered": ["Tuesday 6 October, 10:00-10:30 (UTC)", "Wednesday 7 October, 14:00-14:30 (UTC)"], "chosen_slot": 2}
+{"id": "int-05", "category": "interested", "subject": "Re: options", "body": "Option 1 is good, see you then.", "offered": ["Tuesday 6 October, 10:00-10:30 (UTC)", "Wednesday 7 October, 14:00-14:30 (UTC)"], "chosen_slot": 1}
+{"id": "int-06", "category": "interested", "subject": "Re: phishing tests", "body": "Sure. Does Thursday 8 October at 15:00 UTC work for you?", "proposed": true}
+{"id": "int-07", "category": "interested", "subject": "Re: compliance", "body": "Interesting timing, our ISO 27001 audit flagged this exact gap. Who should I talk to?"}
+{"id": "int-08", "category": "interested", "subject": "RE: security awareness", "body": "Can you share a case study or a sample report first? If it looks good we can set up a call."}
+{"id": "int-09", "category": "interested", "subject": "Re: your note", "body": "We've been meaning to replace our current LMS module. Let's talk."}
+{"id": "int-10", "category": "interested", "subject": "Re: hello", "body": "How does your pricing compare to KnowBe4? We might switch at renewal."}
+{"id": "nn-01", "category": "not_now", "subject": "Re: phishing simulations", "body": "Not a priority right now. Reach out again next quarter."}
+{"id": "nn-02", "category": "not_now", "subject": "Re: training", "body": "We're in the middle of a big migration until January. Could you follow up then?"}
+{"id": "nn-03", "category": "not_now", "subject": "Re: audit evidence", "body": "Timing is bad, budget is frozen until the new fiscal year in April. Check back in the spring."}
+{"id": "nn-04", "category": "not_now", "subject": "Re: quick question", "body": "Maybe later in the year. We just signed off on this year's tooling."}
+{"id": "nn-05", "category": "not_now", "subject": "Re: compliance", "body": "Interesting but we have too much on our plate this month. Ping me in a couple of months."}
+{"id": "nn-06", "category": "not_now", "subject": "Re: hello", "body": "After our SOC 2 audit wraps up in November I'd be open to a conversation."}
+{"id": "nn-07", "category": "not_now", "subject": "RE: awareness", "body": "Hold off for now please, we're restructuring the team. Try me again in Q2."}
+{"id": "nn-08", "category": "not_now", "subject": "Re: follow up", "body": "Not this year. Our contract runs until next summer, get in touch closer to then."}
+{"id": "wp-01", "category": "wrong_person", "subject": "Re: phishing simulations", "body": "I'm not the right person for this. Please contact our IT security lead, Priya Shah, at priya.shah@northwind.com.", "referral_email": "priya.shah@northwind.com"}
+{"id": "wp-02", "category": "wrong_person", "subject": "Re: training", "body": "This would be HR. Try Marcus (marcus.lee@brightline.io), he runs L&D.", "referral_email": "marcus.lee@brightline.io"}
+{"id": "wp-03", "category": "wrong_person", "subject": "Re: audit", "body": "Wrong person, sorry. I handle facilities."}
+{"id": "wp-04", "category": "wrong_person", "subject": "Re: compliance", "body": "I've moved roles and no longer own security. Jane Ortiz took over, she's the one to speak to."}
+{"id": "wp-05", "category": "wrong_person", "subject": "Re: hello", "body": "Not my area. Our CISO is Tom Becker, tom.becker@cedarway-health.org.", "referral_email": "tom.becker@cedarway-health.org"}
+{"id": "wp-06", "category": "wrong_person", "subject": "Re: your email", "body": "We outsource our IT entirely to an MSP, so I'm not the one who decides on this."}
+{"id": "wp-07", "category": "wrong_person", "subject": "Re: quick question", "body": "You want our compliance team for this, not me."}
+{"id": "wp-08", "category": "wrong_person", "subject": "RE: security training", "body": "I left this company last month. Please update your records."}
+{"id": "ob-01", "category": "objection", "subject": "Re: phishing simulations", "body": "We already use KnowBe4 and we're happy with it."}
+{"id": "ob-02", "category": "objection", "subject": "Re: training", "body": "Thanks, but we don't have budget for another tool."}
+{"id": "ob-03", "category": "objection", "subject": "Re: audit evidence", "body": "Not interested, thanks."}
+{"id": "ob-04", "category": "objection", "subject": "Re: hello", "body": "We built our own training in-house, so we don't need this."}
+{"id": "ob-05", "category": "objection", "subject": "Re: compliance", "body": "Honestly these trainings never change behaviour. Why would yours be different?"}
+{"id": "ob-06", "category": "objection", "subject": "Re: quick question", "body": "Too expensive for a company our size, we're only 25 people."}
+{"id": "ob-07", "category": "objection", "subject": "Re: awareness", "body": "Our insurer provides free training already, so no thanks."}
+{"id": "ob-08", "category": "objection", "subject": "Re: follow up", "body": "No thank you, we're all set."}
+{"id": "ob-09", "category": "objection", "subject": "RE: phishing", "body": "Staff hate fake phishing emails, it destroys trust. We won't do it."}
+{"id": "ooo-01", "category": "out_of_office", "subject": "Automatic reply: phishing simulations", "body": "I am out of the office until 12 October 2026 with limited access to email. For urgent matters contact helpdesk@northwind.com.", "return_date": "2026-10-12"}
+{"id": "ooo-02", "category": "out_of_office", "subject": "Out of Office", "body": "Thanks for your email. I'm on annual leave and will return on Monday 19 October. I'll respond when I'm back.", "return_date": "2026-10-19"}
+{"id": "ooo-03", "category": "out_of_office", "subject": "Auto: Re: training", "body": "I'm currently on parental leave. Your message will not be forwarded."}
+{"id": "ooo-04", "category": "out_of_office", "subject": "Automatic reply", "body": "I'm travelling for a conference this week and will reply when I'm back."}
+{"id": "ooo-05", "category": "out_of_office", "subject": "Out of office: Re: audit", "body": "Hello, I am away until 2026-10-09. Please expect a delay in my response.", "return_date": "2026-10-09"}
+{"id": "ooo-06", "category": "out_of_office", "subject": "Autoreply: hello", "body": "This mailbox is not monitored over the holiday period. I'll be back in the office on 2 November.", "return_date": "2026-11-02"}
+{"id": "ooo-07", "category": "out_of_office", "subject": "Automatic reply: compliance", "body": "I'm out sick today. I'll get back to you as soon as I can."}
+{"id": "un-01", "category": "unsubscribe", "subject": "Re: phishing simulations", "body": "Please remove me from your mailing list."}
+{"id": "un-02", "category": "unsubscribe", "subject": "Re: training", "body": "Not interested. Stop emailing me."}
+{"id": "un-03", "category": "unsubscribe", "subject": "Re: audit", "body": "Take me off your list."}
+{"id": "un-04", "category": "unsubscribe", "subject": "Re: hello", "body": "Unsubscribe"}
+{"id": "un-05", "category": "unsubscribe", "subject": "Re: quick question", "body": "This is spam. Do not contact me again."}
+{"id": "un-06", "category": "unsubscribe", "subject": "Re: compliance", "body": "I never signed up for this. Delete my details please."}
+{"id": "un-07", "category": "unsubscribe", "subject": "Re: follow up", "body": "Please stop. Third email this month, I'm not interested and don't want to hear from you."}
+{"id": "un-08", "category": "unsubscribe", "subject": "RE: awareness", "body": "Opt me out of all future emails."}

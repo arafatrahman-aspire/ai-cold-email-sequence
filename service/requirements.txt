@@ -1,0 +1,13 @@
+# Floors rather than exact pins: the Docker image runs Python 3.12, but these
+# also resolve to wheels on 3.13/3.14 so the tests run on a modern local
+# interpreter without a Rust toolchain.
+fastapi>=0.115.6
+uvicorn[standard]>=0.34.0
+pydantic[email]>=2.12
+pydantic-settings>=2.7.0
+httpx>=0.28.1
+apscheduler>=3.11.0
+langgraph>=0.2.60
+python-dotenv>=1.0.1
+tenacity>=9.0.0
+tzdata>=2025.2

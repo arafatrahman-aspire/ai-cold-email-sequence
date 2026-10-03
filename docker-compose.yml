@@ -1,0 +1,36 @@
+services:
+  backend:
+    build: ./service
+    container_name: out01-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Trust X-Forwarded-For from the frontend proxy so per-client rate limits
+      # see the real browser IP. The backend port is published on loopback only.
+      FORWARDED_ALLOW_IPS: "*"
+    # Direct API access for scripts/cron (API_KEY); the console uses the frontend.
+    ports:
+      - "127.0.0.1:${HOST_PORT:-8080}:8080"
+    # Lets the container reach services on the host (e.g. OmniRoute, CMS) as
+    # host.docker.internal. Built in on Mac/Windows; needed on Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # The service talks to Supabase over the network; nothing is stored locally.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build: ./frontend
+    container_name: out01-console
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    # Must match the port in APP_PUBLIC_URL (default http://localhost:5173).
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
