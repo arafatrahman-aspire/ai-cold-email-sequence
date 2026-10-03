@@ -87,6 +87,25 @@ export function Field({ label, hint, children }) {
   )
 }
 
+// "Inbox checked every 10 min · next check 14:20 (in 6 min)", from /health.
+export function ReplyCheckSchedule({ schedule }) {
+  const job = schedule?.poller
+  if (!schedule) return null
+  if (!job) {
+    return <span className="schedule-note">Background checks are off (RUN_WORKERS=false): use "Check replies".</span>
+  }
+  const mins = Math.round(job.interval_seconds / 60)
+  const next = job.next_run ? new Date(job.next_run) : null
+  const inMin = next ? Math.max(0, Math.round((next - Date.now()) / 60000)) : null
+  return (
+    <span className="schedule-note">
+      <span className="pulse" aria-hidden="true" />
+      Inbox checked every {mins} min
+      {next && <> · next check {next.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({inMin === 0 ? 'now' : `in ${inMin} min`})</>}
+    </span>
+  )
+}
+
 // A textarea that grows to fit its text, so nothing is hidden behind a scrollbar.
 export function AutoTextarea({ value, minRows = 4, ...props }) {
   const ref = useRef(null)

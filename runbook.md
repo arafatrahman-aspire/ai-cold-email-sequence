@@ -148,7 +148,7 @@ Do these **in order**, with `DRY_RUN=true`, before real sending:
 - [ ] **Review the copy** of each sequence (Preview, or the `cold_email.emails` table).
 - [ ] **Reply alert:** **Replies** → set the alert address → *Send test alert*.
 - [ ] Set `DRY_RUN=false`, restart, and send to **your own** test address.
-- [ ] **Stop on reply:** reply to it → after one poll (≤ 7 min, or *Run poller*)
+- [ ] **Stop on reply:** reply to it → after one poll (≤ 10 min, or *Check replies*)
       the lead is *Replied*, remaining emails are *Cancelled*, and an alert arrives.
 - [ ] **Stop on unsubscribe:** reply "please remove me" → *Unsubscribed*, and the address is suppressed.
 - [ ] **Stop on bounce:** send to a dead address → *Bounced*.
@@ -369,7 +369,7 @@ docker compose logs -f out01
 
 | Log line | Means |
 |---|---|
-| `scheduler started (intake 300s, send 180s, poll 420s)` | Workers are running |
+| `scheduler started (intake 300s, send 180s, poll 600s, triage 60s)` | Workers are running |
 | `lead … routed to it by keyword` | Persona chosen |
 | `lead …: 4-step it sequence ready, timezone Asia/Dhaka (from …)` | Drafted and scheduled; shows which timezone was used and why |
 | `lead … needs manual review: …` | Draft failed checks twice |

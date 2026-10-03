@@ -29,7 +29,7 @@ FastAPI service (Docker)  ── APScheduler ──┬── intake worker  (eve
                                            │     kill switch → lead status → suppression → hours → cap
                                            │     send via SMTP or Graph, record on the email
                                            │
-                                           └── poller worker  (every 7 min)
+                                           └── poller worker  (at start, then every 10 min)
                                                  IMAP or Graph poll
                                                  classify → cancel sequence
 ```

@@ -9,6 +9,8 @@ overlapping with it.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
+from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -57,6 +59,8 @@ def start() -> AsyncIOScheduler:
         coalesce=True,
         misfire_grace_time=60,
     )
+    # Replies: checked as soon as the service starts, then every interval
+    # (POLL_INTERVAL_SECONDS, default 10 minutes).
     _scheduler.add_job(
         _guard("poller", poller.run_once),
         trigger=IntervalTrigger(seconds=s.poll_interval_seconds),
@@ -64,6 +68,7 @@ def start() -> AsyncIOScheduler:
         max_instances=1,
         coalesce=True,
         misfire_grace_time=60,
+        next_run_time=datetime.now(timezone.utc),
     )
 
     _scheduler.add_job(
@@ -82,6 +87,19 @@ def start() -> AsyncIOScheduler:
         s.triage_interval_seconds,
     )
     return _scheduler
+
+
+def status() -> dict[str, Any]:
+    """Each background job's interval and next run, for the dashboard."""
+    if _scheduler is None:
+        return {}
+    return {
+        job.id: {
+            "interval_seconds": int(job.trigger.interval.total_seconds()),
+            "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
+        }
+        for job in _scheduler.get_jobs()
+    }
 
 
 def shutdown() -> None:

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api.js'
 import { CATEGORIES, CATEGORY_ORDER, TRIAGE_STATUS, formatNumber, relativeTime } from '../../labels.js'
 import { BarList, StatTile } from '../Dashboard.jsx'
-import { Badge, Card, ErrorNote, Spinner, useAction } from '../ui.jsx'
+import { Badge, Card, ErrorNote, ReplyCheckSchedule, Spinner, useAction } from '../ui.jsx'
 
 const FILTERS = [['all', 'All'], ['needs_human', 'Needs you'], ...CATEGORY_ORDER.map((c) => [c, CATEGORIES[c][1]])]
 
@@ -92,12 +92,14 @@ function ReplyCard({ reply, onChanged }) {
 export default function TriageReplies() {
   const [filter, setFilter] = useState('all')
   const [stats, setStats] = useState(null)
+  const [schedule, setSchedule] = useState(null)
   const [replies, setReplies] = useState(null)
   const [{ busy, error }, load] = useAction(async () => {
     const cat = CATEGORY_ORDER.includes(filter) ? filter : null
-    const [s, r] = await Promise.all([api.triageStats(), api.triageEvents(cat)])
+    const [s, r, h] = await Promise.all([api.triageStats(), api.triageEvents(cat), api.health()])
     setStats(s)
     setReplies(r.events || [])
+    setSchedule(h.schedule || {})
   })
   const [{ busy: running, error: runError, result: runResult }, runNow] = useAction(() => api.run('triage'))
 
@@ -127,6 +129,7 @@ export default function TriageReplies() {
           </p>
         </div>
         <div className="toolbar-actions">
+          <ReplyCheckSchedule schedule={schedule} />
           <button className="btn" onClick={() => runNow().then(refresh)} disabled={running}>
             {running ? <Spinner /> : null} Triage now
           </button>

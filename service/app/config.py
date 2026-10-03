@@ -105,7 +105,7 @@ class Settings(BaseSettings):
     run_workers: bool = True
     intake_interval_seconds: int = 300
     send_interval_seconds: int = 180
-    poll_interval_seconds: int = 420
+    poll_interval_seconds: int = 600  # reply check: every 10 minutes
     triage_interval_seconds: int = 60
 
     # --- Misc ---------------------------------------------------------------

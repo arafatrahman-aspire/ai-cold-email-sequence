@@ -198,7 +198,7 @@ export default function Replies() {
               ))}
             </ul>
           ) : (
-            <p className="muted">Nothing here yet. New mail is checked every 7 minutes, or use "Check replies" on the Overview.</p>
+            <p className="muted">Nothing here yet. New mail is checked every 10 minutes, or use "Check replies" on the Overview.</p>
           )}
         </Card>
       )}

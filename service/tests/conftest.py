@@ -2,10 +2,10 @@ import os
 import sys
 from pathlib import Path
 
-# Tests exercise pure logic (scheduling, routing, parsing, validation) and never
-# touch the network or the database, so a placeholder DSN is enough to let
-# Settings construct.
-os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost:5432/postgres")
+# Unit tests never touch the network or the database, so placeholders are
+# enough to let Settings construct. (Integration tests set real values.)
+os.environ.setdefault("SUPABASE_URL", "http://localhost:54321")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

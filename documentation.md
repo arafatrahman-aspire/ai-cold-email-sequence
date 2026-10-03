@@ -32,7 +32,7 @@ still unsent for that lead is cancelled. For each reply, someone gets an
                         │                             │
                         │  every 5 min  intake  ──────┼──▶ LLM (Gemini / OmniRoute)
                         │  every 3 min  sender  ──────┼──▶ SMTP or Microsoft Graph
-                        │  every 7 min  poller  ◀─────┼─── IMAP or Microsoft Graph
+                        │  every 10 min poller  ◀─────┼─── IMAP or Microsoft Graph
                         └──────────────┬──────────────┘
                                        │ Supabase REST API (secret key)
                         ┌──────────────▼──────────────┐
@@ -270,7 +270,7 @@ There are two kinds of configuration:
 | `INBOX_<REF>_SMTP_PASSWORD` | One per inbox (see 7.3); optional `_IMAP_PASSWORD` |
 | `UNSUBSCRIBE_MAILTO`, `REPLY_TO` | Optional sending identity overrides |
 | `RUN_WORKERS` | `false` = API only, no background jobs |
-| `INTAKE/SEND/POLL_INTERVAL_SECONDS` | Worker timing (300 / 180 / 420) |
+| `INTAKE/SEND/POLL_INTERVAL_SECONDS` | Worker timing (300 / 180 / 600); the reply check also runs once at startup |
 | `DRY_RUN` | `true` = nothing is actually sent |
 | `API_KEY` | Bearer token for scripts |
 | `APP_PUBLIC_URL`, `CMS_PUBLIC_URL`, `SSO_CLIENT_SECRET` | **Required** login settings |

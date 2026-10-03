@@ -7,7 +7,7 @@ import {
   formatNumber,
 } from '../labels.js'
 import NeedsAttention from './NeedsAttention.jsx'
-import { Badge, Card, ErrorNote, Spinner, useAction } from './ui.jsx'
+import { Badge, Card, ErrorNote, ReplyCheckSchedule, Spinner, useAction } from './ui.jsx'
 
 const REFRESH_MS = 30_000
 
@@ -114,7 +114,7 @@ function JobResult({ label, result }) {
   )
 }
 
-function RunJobs({ onDone, dryRun }) {
+function RunJobs({ onDone, dryRun, schedule }) {
   const [running, setRunning] = useState(null)
   const [last, setLast] = useState(null)
   const [confirming, setConfirming] = useState(false)
@@ -134,7 +134,7 @@ function RunJobs({ onDone, dryRun }) {
   }
 
   return (
-    <Card title="Run now" subtitle="These also run on their own every few minutes.">
+    <Card title="Run now" subtitle="These also run on their own in the background." actions={<ReplyCheckSchedule schedule={schedule} />}>
       <div className="jobs">
         {JOBS.map(([job, label, hint, call]) => (
           <button
@@ -338,7 +338,7 @@ export default function Dashboard({ health, onRefreshHealth }) {
         </div>
       </div>
 
-      <RunJobs onDone={refresh} dryRun={health?.dry_run} />
+      <RunJobs onDone={refresh} dryRun={health?.dry_run} schedule={health?.schedule} />
     </div>
   )
 }
