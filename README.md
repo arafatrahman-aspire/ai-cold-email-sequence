@@ -380,8 +380,14 @@ into the lead's business hours. If the AI is less than 70% sure, nothing
 auto-sends and nothing irreversible happens (no booking, unsubscribe or
 snooze) until a person confirms or corrects the category.
 
+**Conversation context**: before classifying a reply or writing an answer,
+the AI reads the last 4 emails of the thread (ours and theirs, oldest first,
+quoted text removed), so short replies like "yes, Tuesday works" make sense.
+The number is "Earlier emails the AI reads" in Reply triage → Settings.
+
 **Setup**
-1. Run `supabase/migrations/0006_triage.sql` in the Supabase SQL Editor.
+1. Run `supabase/migrations/0006_triage.sql`, then `0007_conversation.sql`,
+   in the Supabase SQL Editor.
 2. In `.env`, set `CALENDAR_PROVIDER=calcom` with `CALCOM_API_KEY`,
    `CALCOM_EVENT_TYPE_ID` and `CALCOM_BOOKING_URL` (or `fake` to try it
    without Cal.com), then restart the backend.

@@ -12,6 +12,7 @@ const DEFAULTS = {
   min_confidence: 0.7,
   not_now_days: 60,
   ooo_default_days: 7,
+  context_messages: 4,
   meeting: { slots_to_offer: 2, days_ahead: 7, min_notice_hours: 12 },
 }
 
@@ -25,6 +26,7 @@ function validate(d) {
   if (!isInt(c, 0, 100)) e.confidence = 'Use a percentage from 0 to 100.'
   if (!isInt(d.not_now_days, 7, 365)) e.not_now = 'Use 7 to 365 days.'
   if (!isInt(d.ooo_default_days, 1, 60)) e.ooo = 'Use 1 to 60 days.'
+  if (!isInt(d.context_messages, 0, 10)) e.context = 'Use 0 to 10 emails.'
   const m = d.meeting
   if (!isInt(m.slots_to_offer, 1, 5)) e.slots = 'Offer 1 to 5 times.'
   if (!isInt(m.days_ahead, 1, 30)) e.days = 'Look 1 to 30 days ahead.'
@@ -160,6 +162,11 @@ export default function TriageSettings() {
                 </label>
               ))}
             </div>
+          </Row>
+          <Row label="Earlier emails the AI reads" error={errors.context}
+            description="Before reading a new reply or writing an answer, the AI sees this many earlier emails of the conversation (ours and theirs), so short replies like 'yes, Tuesday works' make sense.">
+            <NumberInput value={draft.context_messages} min={0} max={10} suffix="emails"
+              onChange={(v) => set({ context_messages: v })} />
           </Row>
           <Row label="Confidence needed" error={errors.confidence}
             description="Below this, the AI's reading is treated as a guess: nothing auto-sends, and no booking, unsubscribe or snooze happens until you confirm.">

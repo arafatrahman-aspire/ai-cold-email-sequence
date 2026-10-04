@@ -417,6 +417,17 @@ async def add_referral(
     return row["outcome"], row["lead_id"]
 
 
+async def conversation_history(
+    lead_id: str, before: datetime | str, exclude_event: str | None = None, limit: int = 4
+) -> list[dict[str, Any]]:
+    """The last ``limit`` messages with the lead before ``before``, oldest
+    first, both directions (needs 0007_conversation.sql)."""
+    return await db.rows(
+        "conversation_history", p_lead_id=lead_id, p_before=before,
+        p_exclude_event=exclude_event, p_limit=limit,
+    )
+
+
 async def referral_names(lead_ids: list[str]) -> dict[str, str]:
     """lead_id -> name of whoever referred them, for referred leads only."""
     if not lead_ids:

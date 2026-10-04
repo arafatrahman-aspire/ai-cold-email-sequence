@@ -36,8 +36,10 @@ class ScriptedLLM:
 
     def __init__(self, verdict: dict):
         self.verdict = verdict
+        self.prompts: list[str] = []
 
     async def complete_json(self, system, user, *, temperature):
+        self.prompts.append(user)
         if "triage replies" in system:
             return Completion(json.dumps(self.verdict), "m", "test")
         options = []
@@ -111,6 +113,7 @@ def llm(monkeypatch, **verdict):
     gateway = ScriptedLLM(verdict)
     monkeypatch.setattr("app.triage.classify.get_gateway", lambda: gateway)
     monkeypatch.setattr("app.triage.drafting.get_gateway", lambda: gateway)
+    return gateway
 
 
 def event(body="Sounds good", event_type="reply", human_category=None):
@@ -331,3 +334,40 @@ async def test_a_persons_category_works_even_with_the_ai_down(monkeypatch, db, c
     assert calls(db, "snooze_lead")
     # The reply falls back to the plain template.
     assert db["drafts"][0]["kind"] == "not_now_ack" and "check back" in db["drafts"][0]["body"]
+
+
+
+@pytest.mark.anyio
+async def test_both_ai_steps_see_the_conversation(monkeypatch, db, calendar):
+    asked = {}
+
+    async def history(lead_id, before, exclude_event=None, limit=4):
+        asked.update(lead_id=lead_id, exclude_event=exclude_event, limit=limit)
+        return [
+            {"direction": "out", "subject": "phishing simulations", "body": "Would a 20-minute call help?",
+             "at": "2026-10-01T09:00:00+00:00"},
+            {"direction": "in", "subject": "Re: phishing simulations", "body": "What would it cost for 400 people?",
+             "at": "2026-10-02T09:00:00+00:00"},
+            {"direction": "out", "subject": "Re: phishing simulations", "body": "Around EUR 8 per seat per year.",
+             "at": "2026-10-03T09:00:00+00:00"},
+        ]
+    monkeypatch.setattr(repo, "conversation_history", history)
+    gateway = llm(monkeypatch, category="objection", objection="price")
+    await run(event("Still too much for us.\n\nOn Sat, Alex wrote:\n> Around EUR 8 per seat"))
+
+    assert asked == {"lead_id": "lead-1", "exclude_event": "ev-1", "limit": 4}
+    classify_prompt, draft_prompt = gateway.prompts
+    for p in (classify_prompt, draft_prompt):
+        assert "What would it cost for 400 people?" in p and "Around EUR 8 per seat per year." in p
+        assert "Dana Okafor -> us" in p and "Us -> Dana Okafor" in p
+    # The new reply is passed without its quoted tail.
+    assert "Still too much for us." in classify_prompt and "> Around EUR 8" not in classify_prompt
+
+
+@pytest.mark.anyio
+async def test_missing_history_function_falls_back(monkeypatch, db, calendar):
+    async def missing(*a, **k):
+        raise RuntimeError("conversation_history: HTTP 404 PGRST202")
+    monkeypatch.setattr(repo, "conversation_history", missing)
+    llm(monkeypatch, category="not_now")
+    assert await run() == "not_now"

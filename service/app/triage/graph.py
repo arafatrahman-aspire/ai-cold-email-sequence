@@ -25,6 +25,7 @@ class TriageState(TypedDict, total=False):
     lead_timezone: str
     today: date
     last_sent: Optional[dict]
+    history: Optional[str]
     offered: list[str]
     forced_category: Optional[str]
     has_meeting: bool
@@ -40,6 +41,7 @@ async def classify_node(state: TriageState) -> dict[str, Any]:
         lead_timezone=state.get("lead_timezone") or "UTC",
         today=state.get("today") or date.today(),
         last_sent=state.get("last_sent"),
+        history=state.get("history"),
         offered=state.get("offered") or None,
         forced_category=state.get("forced_category"),
     )

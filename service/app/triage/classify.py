@@ -81,9 +81,15 @@ def build_prompt(
     last_sent: Optional[dict] = None,
     offered: Optional[list[str]] = None,
     forced_category: Optional[str] = None,
+    history: Optional[str] = None,
 ) -> str:
     parts = [f"Lead's timezone: {lead_timezone}. Today's date there: {today.isoformat()} ({today:%A})."]
-    if last_sent:
+    if history:
+        parts.append(
+            "The conversation so far, oldest first (for context; classify only the NEW reply below):\n"
+            + history
+        )
+    elif last_sent:
         parts.append(
             "Our last email to them:\nSubject: "
             f"{last_sent.get('subject') or ''}\n{(last_sent.get('body') or '')[:1200]}"
@@ -96,7 +102,7 @@ def build_prompt(
             f'A person has already decided the category is "{forced_category}". '
             "Use exactly that category and extract the details."
         )
-    parts.append(f"Their reply:\nSubject: {subject or ''}\n{(body or '')[:3000]}")
+    parts.append(f"Their NEW reply:\nSubject: {subject or ''}\n{(body or '')[:3000]}")
     return "\n\n".join(parts)
 
 
@@ -176,10 +182,12 @@ async def classify_reply(
     last_sent: Optional[dict] = None,
     offered: Optional[list[str]] = None,
     forced_category: Optional[str] = None,
+    history: Optional[str] = None,
 ) -> TriageResult:
     prompt = build_prompt(
         subject, body, lead_timezone=lead_timezone, today=today,
         last_sent=last_sent, offered=offered, forced_category=forced_category,
+        history=history,
     )
     try:
         completion = await get_gateway().complete_json(SYSTEM, prompt, temperature=0.0)

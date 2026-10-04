@@ -546,3 +546,43 @@ async def test_triage_database_functions(database):
     assert stats["meeting_leads"] == 1 and stats["replied_leads"] == 1
     # The person's correction (not_now) wins over the model's "interested".
     assert stats["drafts"]["sent"] == 1 and stats["categories"] == {"not_now": 1}
+
+
+@pytest.mark.anyio
+async def test_conversation_history(database):
+    """The thread before a reply: oldest first, both directions, sent only."""
+    from app import repository as repo
+
+    pg = database
+    inbox_id = await _seed(pg)
+    assert (await repo.enroll_lead("L-1", CONTACTABLE, True))[0] == "enrolled"
+    lead_id = str(await pg.fetchval("select id from public.leads where lead_id='L-1'"))
+    t0 = datetime(2026, 10, 1, 9, 0, tzinfo=timezone.utc)
+
+    emails = [{"step_number": i, "subject": f"cold {i}", "body": f"cold body {i}"} for i in (1, 2, 3)]
+    await repo.store_sequence(lead_id, "ciso", "keyword", "g", "m", emails,
+                              [t0, t0 + timedelta(days=3), t0 + timedelta(days=7)])
+    # Emails 1 and 2 were sent; 3 is still scheduled and must not appear.
+    await pg.execute(
+        "update cold_email.emails set status='sent', sent_at = due_at"
+        " where lead_id=$1::uuid and step_number < 3", lead_id)
+    await repo.record_inbox_event(inbox_id, lead_id, "reply", "ciso@example.com", "o@x",
+                                  "Re: cold 2", "<in-1@x>", None, "What does it cost?", t0 + timedelta(days=4))
+    [first_reply] = await repo.list_inbox_events(["reply"], 10)
+    draft = await repo.create_draft(first_reply["id"], lead_id, inbox_id, "objection_reply", "ciso@example.com",
+                                    "Re: cold 2", "About EUR 8 per seat.", [], "<in-1@x>", [], None)
+    await pg.execute("update cold_email.reply_drafts set status='sent', sent_at=$2 where id=$1::uuid",
+                     draft, t0 + timedelta(days=5))
+    await repo.record_inbox_event(inbox_id, lead_id, "reply", "ciso@example.com", "o@x",
+                                  "Re: cold 2", "<in-2@x>", None, "Still too much.", t0 + timedelta(days=6))
+    newest = next(e for e in await repo.list_inbox_events(["reply"], 10) if e["snippet"] == "Still too much.")
+
+    history = await repo.conversation_history(lead_id, newest["received_at"], newest["id"], 10)
+    assert [(h["direction"], h["body"]) for h in history] == [
+        ("out", "cold body 1"), ("out", "cold body 2"), ("in", "What does it cost?"),
+        ("out", "About EUR 8 per seat."),
+    ]
+    # Only the most recent N, still oldest first.
+    last2 = await repo.conversation_history(lead_id, newest["received_at"], newest["id"], 2)
+    assert [h["body"] for h in last2] == ["What does it cost?", "About EUR 8 per seat."]
+    assert await repo.conversation_history(lead_id, newest["received_at"], newest["id"], 0) == []

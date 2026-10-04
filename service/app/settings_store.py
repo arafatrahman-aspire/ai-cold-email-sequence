@@ -45,6 +45,7 @@ DEFAULTS: dict[str, Any] = {
         "min_confidence": 0.7,
         "not_now_days": 60,
         "ooo_default_days": 7,
+        "context_messages": 4,
         "meeting": {"slots_to_offer": 2, "days_ahead": 7, "min_notice_hours": 12},
     },
 }

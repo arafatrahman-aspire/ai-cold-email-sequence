@@ -25,6 +25,7 @@ from app.calendar.slots import describe_slot, find_slot, pick_slots
 from app.mail.base import Inbox, MailError, OutgoingMessage
 from app.mail.factory import get_sender
 from app.scheduling import advance_business_days, clamp_into_window, resolve_timezone
+from app.triage.conversation import format_history, strip_quoted
 from app.triage.drafting import DraftInput, write_draft
 from app.triage.graph import triage
 
@@ -86,14 +87,31 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
     ctx = await repo.triage_context(lead_id)
     offered = [Slot.from_json(x) for x in ctx.get("offered_slots") or []]
 
+    # The thread so far, so the AI reads "yes, Tuesday works" in context.
+    history_text: Optional[str] = None
+    wanted = int(cfg.get("context_messages", 4) or 0)
+    if wanted > 0:
+        try:
+            history = await repo.conversation_history(
+                lead_id, event.get("received_at") or now.isoformat(), event_id, wanted
+            )
+            if history:
+                lead_name = " ".join(p for p in (lead.get("first_name"), lead.get("last_name")) if p)
+                history_text = format_history(history, lead_name=lead_name, lead_timezone=tz)
+        except Exception as exc:  # e.g. 0007_conversation.sql not run yet
+            log.warning("conversation history unavailable (%s); using our last email only", exc)
+    raw_body = event.get("snippet") or ""
+    reply_body = strip_quoted(raw_body) or raw_body
+
     try:
         state = await triage({
             "subject": event.get("subject") or "",
-            "body": event.get("snippet") or "",
+            "body": reply_body,
             "event_type": event.get("event_type") or "reply",
             "lead_timezone": tz,
             "today": now.astimezone(resolve_timezone(tz)).date(),
             "last_sent": ctx.get("last_sent"),
+            "history": history_text,
             "offered": [describe_slot(s, tz) for s in offered],
             "forced_category": event.get("human_category"),
             "has_meeting": bool(ctx.get("has_meeting")),
@@ -226,7 +244,7 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
                 first_name=lead.get("first_name"),
                 sign_off=sign_off,
                 reply_subject=event.get("subject") or "",
-                reply_body=event.get("snippet") or "",
+                reply_body=reply_body,
                 slot_lines=slot_lines,
                 booking_link=calendar.booking_link() if calendar else None,
                 booked=booked,
@@ -234,6 +252,7 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
                 objection=extracted.get("objection"),
                 referral=referral_name,
                 snooze_days=int(cfg["not_now_days"]),
+                history=history_text,
             ))
             auto = (not needs_human and draft_kind in cfg["auto_send_kinds"])
             refs = [r for r in (event.get("in_reply_to"), event.get("message_id")) if r]

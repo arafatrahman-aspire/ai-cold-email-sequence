@@ -35,6 +35,8 @@ Rules:
 - No subject line, no greeting block beyond "Hi <first name>," (or "Hi," if
   the name is unknown), and end with the sign-off name given, on its own line.
 - Copy any time options or links you are given exactly as written.
+- Read the conversation so far: stay consistent with what we already said,
+  do not repeat it, and answer what they actually asked.
 
 Return ONLY: {"body": "..."}
 """
@@ -89,6 +91,8 @@ class DraftInput:
     objection: Optional[str] = None
     referral: Optional[str] = None
     snooze_days: int = 60
+    # The earlier messages of the thread, already formatted (oldest first).
+    history: Optional[str] = None
 
 
 def reply_subject(subject: str) -> str:
@@ -173,7 +177,9 @@ def _prompt(d: DraftInput) -> str:
     ]
     if d.slot_lines:
         parts.append("Time options (copy exactly, one per line):\n" + "\n".join(d.slot_lines))
-    parts.append(f"Their reply:\nSubject: {d.reply_subject}\n{d.reply_body[:2000]}")
+    if d.history:
+        parts.append("The conversation so far, oldest first:\n" + d.history)
+    parts.append(f"Their new reply (the one you are answering):\nSubject: {d.reply_subject}\n{d.reply_body[:2000]}")
     return "\n\n".join(parts)
 
 
