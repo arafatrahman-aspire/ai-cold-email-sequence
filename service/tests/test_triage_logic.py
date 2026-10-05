@@ -199,3 +199,25 @@ def test_referral_reaches_the_sequence_prompt():
 def test_no_slots_prompt_asks_for_times():
     prompt = drafting._prompt(_input(slot_lines=[], booking_link=None))
     assert "which days and times suit" in prompt and "Time options" not in prompt
+
+
+def test_draft_never_invents_a_meeting_time_or_invite():
+    """A live reply once promised "5 PM on Tuesday ... I'll send over a meeting
+    link" with no calendar behind it. Such text falls back to the template."""
+    ask = _input(slot_lines=[], booking_link=None, reply_body="Yes 5 pm works for me. Give me meeting link")
+    assert drafting._ensure("Hi Dana,\n\nI can do 5 PM on Tuesday. I'll send over a meeting link.\n\nAlex", ask) is None
+    assert drafting._ensure("Hi Dana,\n\nGreat, 5 PM works. Which day?\n\nAlex", ask) is None
+    assert drafting._ensure("Hi Dana,\n\nWould 10:30 suit you?\n\nAlex", ask) is None
+    assert drafting._ensure("Hi Dana,\n\nI will send you an invite.\n\nAlex", ask) is None
+    assert drafting._ensure("Hi Dana,\n\nWhich days and times suit you this week?\n\nAlex", ask)
+
+    # Saying their own time is not free is fine; the offered times are given.
+    sorry = _input(kind="slot_unavailable", reply_body="Can we do Tuesday at 5pm?")
+    text = ("Hi Dana,\n\nSorry, 5 PM on Tuesday is taken. Instead:\n- Tuesday 6 October, 10:00-10:30 (UTC)\n"
+            "- Wednesday 7 October, 14:00-14:30 (UTC)\n\nAlex")
+    assert drafting._ensure(text, sorry)
+    assert drafting._ensure(text.replace("Instead:", "Or 3pm? Instead:"), sorry) is None
+
+    booked = _input(kind="booking_confirmation", booked="Tuesday 6 October, 10:00-10:30 (UTC)")
+    assert drafting._ensure("Hi Dana,\n\nYou're booked for Tuesday 6 October, 10:00-10:30 (UTC). "
+                            "I'll send the invite shortly.\n\nAlex", booked)

@@ -2,9 +2,11 @@
 
 The LLM writes the body; the code guarantees the parts that must be exact:
 offered times appear word for word, the booking link is present when there is
-one, and nothing unfilled ("[Name]") slips through. If the model fails or its
-text does not pass, a plain template is used instead, so a reply is never
-lost to a provider hiccup.
+one, nothing unfilled ("[Name]") slips through, and the text never names a
+meeting time or promises a link or invite that the calendar did not give us
+(a reply once promised "5 PM Tuesday" that was not free). If the model fails
+or its text does not pass, a plain template is used instead, so a reply is
+never lost to a provider hiccup.
 """
 
 from __future__ import annotations
@@ -35,6 +37,9 @@ Rules:
 - No subject line, no greeting block beyond "Hi <first name>," (or "Hi," if
   the name is unknown), and end with the sign-off name given, on its own line.
 - Copy any time options or links you are given exactly as written.
+- Never propose, accept or confirm a day or time, and never promise to send a
+  meeting link or calendar invite, unless the task below gives you that time
+  or says the meeting is booked. Without time options, ask for theirs.
 - Read the conversation so far: stay consistent with what we already said,
   do not repeat it, and answer what they actually asked.
 
@@ -74,6 +79,17 @@ INSTRUCTIONS = {
 }
 
 _PLACEHOLDER = re.compile(r"\[[A-Za-z _]{2,30}\]|\{\{.*?\}\}|<[A-Za-z _]{2,30}>")
+# A clock time ("5 PM", "10:30", "9am").
+_CLOCK = re.compile(r"\b\d{1,2}(?::\d{2})?\s?(?:am|pm|a\.m\.|p\.m\.)(?![a-z])|\b\d{1,2}:\d{2}\b", re.IGNORECASE)
+# "I'll send (over) the link / an invite" without a booking behind it.
+_PROMISE = re.compile(
+    r"\b(?:i'll|i will|i'm going to|we'll|we will)\s+(?:\w+\s+){0,3}?send\b[^.?!\n]{0,40}\b(?:link|invite|invitation)",
+    re.IGNORECASE,
+)
+
+
+def _clock(text: str) -> str:
+    return re.sub(r"[\s.]", "", text.lower())
 _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.MULTILINE)
 
 
@@ -147,7 +163,25 @@ def _ensure(body: str, d: DraftInput) -> Optional[str]:
         body = body.rstrip() + f"\n\nOr pick any time that suits you here: {d.booking_link}"
     if d.kind == "booking_confirmation" and d.booked and d.booked not in body:
         return None
+    if _invents_meeting(body, d):
+        log.warning("AI %s draft named a time or promised an invite it was not given", d.kind)
+        return None
     return body
+
+
+def _invents_meeting(body: str, d: DraftInput) -> bool:
+    """True if the text names a time we did not give it, or promises a link or
+    invite with no booking behind it. Only when saying their time is not free
+    may it repeat the time they wrote."""
+    rest = body
+    for given in (*d.slot_lines, d.booked, d.booking_link, d.meeting_url):
+        if given:
+            rest = rest.replace(given, " ")
+    theirs = ({_clock(m.group()) for m in _CLOCK.finditer(d.reply_body or "")}
+              if d.kind == "slot_unavailable" else set())
+    if any(_clock(m.group()) not in theirs for m in _CLOCK.finditer(rest)):
+        return True
+    return d.kind != "booking_confirmation" and bool(_PROMISE.search(rest))
 
 
 def _prompt(d: DraftInput) -> str:

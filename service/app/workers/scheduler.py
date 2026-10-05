@@ -1,4 +1,4 @@
-"""APScheduler wiring for the four workers (intake, sender, poller, triage).
+"""APScheduler wiring for the workers (intake, sender, poller, triage, calendar).
 
 This is the cron layer. It lives here rather than in Supabase Edge Functions
 because the send and poll paths need SMTP and IMAP, which Deno cannot provide.
@@ -16,7 +16,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import get_settings
-from app.workers import intake, poller, sender, triage
+from app.workers import calendar_sync, intake, poller, sender, triage
 
 log = logging.getLogger(__name__)
 
@@ -79,12 +79,22 @@ def start() -> AsyncIOScheduler:
         coalesce=True,
         misfire_grace_time=60,
     )
+    # Meetings booked through the booking link (no-op without a calendar).
+    _scheduler.add_job(
+        _guard("calendar", calendar_sync.run_once),
+        trigger=IntervalTrigger(seconds=s.calendar_sync_interval_seconds),
+        id="calendar",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60,
+        next_run_time=datetime.now(timezone.utc),
+    )
 
     _scheduler.start()
     log.info(
-        "scheduler started (intake %ds, send %ds, poll %ds, triage %ds)",
+        "scheduler started (intake %ds, send %ds, poll %ds, triage %ds, calendar %ds)",
         s.intake_interval_seconds, s.send_interval_seconds, s.poll_interval_seconds,
-        s.triage_interval_seconds,
+        s.triage_interval_seconds, s.calendar_sync_interval_seconds,
     )
     return _scheduler
 

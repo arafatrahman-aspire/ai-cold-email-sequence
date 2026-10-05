@@ -27,7 +27,7 @@ from app.mail.base import IncomingMessage, MailError, OutgoingMessage
 from app.mail.factory import close_transports, get_sender
 from app.calendar.base import CalendarError
 from app.calendar.factory import close_calendar, get_calendar
-from app.workers import alerts, intake, poller, scheduler, sender
+from app.workers import alerts, calendar_sync, intake, poller, scheduler, sender
 from app.workers import triage as triage_worker
 
 logging.basicConfig(
@@ -467,7 +467,13 @@ async def triage_reject_draft(draft_id: UUID, user: dict = Depends(require_user)
 
 @app.get("/triage/meetings", dependencies=[Depends(require_user)])
 async def triage_meetings(limit: int = 100) -> dict:
-    return {"meetings": await repo.list_meetings(max(1, min(limit, 500)))}
+    """Booked meetings (from replies and through the link), plus the leads who
+    were offered times and have not answered yet."""
+    return {
+        "meetings": await repo.meetings_overview(max(1, min(limit, 500))),
+        "open_offers": await repo.open_offers(50),
+        "sync": calendar_sync.last_run or None,
+    }
 
 
 @app.get("/triage/snoozed", dependencies=[Depends(require_user)])
@@ -478,6 +484,12 @@ async def triage_snoozed(limit: int = 100) -> dict:
 @app.post("/run/triage", dependencies=[Depends(require_user)])
 async def run_triage() -> dict:
     return {"result": await triage_worker.run_once()}
+
+
+@app.post("/run/calendar-sync", dependencies=[Depends(require_user)])
+async def run_calendar_sync() -> dict:
+    """Read the calendar's bookings now (normally every few minutes)."""
+    return {"result": await calendar_sync.run_once(), "sync": calendar_sync.last_run}
 
 
 @app.post("/triage/evaluate", dependencies=[Depends(require_user)])

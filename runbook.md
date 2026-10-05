@@ -56,6 +56,9 @@ In Supabase → **SQL Editor**, run these files **in order**. Each one is safe t
 | 3 | `supabase/migrations/0003_review.sql` | — |
 | 4 | `supabase/migrations/0004_send_now.sql` | — |
 | 5 | `supabase/migrations/0005_replies.sql` | — |
+| 6 | `supabase/migrations/0006_triage.sql` | — |
+| 7 | `supabase/migrations/0007_conversation.sql` | — |
+| 8 | `supabase/migrations/0008_meeting_sync.sql` | — |
 
 Then: **Project Settings → Data API → Exposed schemas → add `cold_email` → Save.**
 (If you skip this, every call fails with a message telling you to do it.)
@@ -288,6 +291,8 @@ skipped. Useful for testing, not for daily use.
 api -X POST localhost:8080/run/intake    # draft waiting leads
 api -X POST localhost:8080/run/sender    # send what's due
 api -X POST localhost:8080/run/poller    # check inboxes for replies
+api -X POST localhost:8080/run/triage    # triage new replies, send due drafts
+api -X POST localhost:8080/run/calendar-sync   # read Cal.com bookings now
 ```
 
 ---
@@ -350,6 +355,15 @@ Check in this order:
 | First poll says `tracking_started` | Normal. Existing mail is skipped the first time; replies are caught from then on |
 | A reply was missed | It came from an unknown address **and** without thread headers. Block or stop the lead by hand (§4.7) |
 | Out-of-office didn't stop the sequence | By design; auto-replies don't stop it |
+
+### Meetings page is empty
+
+| Symptom | Cause and fix |
+|---|---|
+| "No calendar" note | `CALENDAR_PROVIDER` is `none` or Cal.com settings are wrong; the note says which |
+| "Calendar check failed" | The Cal.com API key or event type is wrong, or Cal.com is down; the reason is shown |
+| A lead booked through the link but it is missing | Press **Check calendar now**. Bookings for other event types only appear when the attendee's address is one of your leads |
+| Error mentioning `meetings_overview` | Run `0008_meeting_sync.sql` |
 
 ### Drafting fails
 

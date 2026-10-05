@@ -13,7 +13,7 @@ import pytest
 from app.calendar.base import Attendee, CalendarError, Slot
 from app.calendar.calcom import CalComProvider
 from app.calendar.fake import FakeCalendar
-from app.calendar.slots import describe_slot, find_slot, pick_slots
+from app.calendar.slots import describe_slot, find_slot, pick_near, pick_slots
 from app.settings_store import BusinessHours
 
 MON = datetime(2026, 10, 5, 0, 0, tzinfo=timezone.utc)  # a Monday
@@ -34,6 +34,7 @@ class FakeCalCom:
     def __init__(self):
         self.requests: list[httpx.Request] = []
         self.booked: set[str] = set()
+        self.listed: list[dict] = []  # what GET /v2/bookings returns
 
     def slots(self):
         out = {}
@@ -50,12 +51,23 @@ class FakeCalCom:
         self.requests.append(request)
         if request.url.path == "/v2/slots":
             return httpx.Response(200, json={"status": "success", "data": self.slots()})
+        if request.url.path == "/v2/bookings" and request.method == "GET":
+            after = datetime.fromisoformat(request.url.params["afterStart"].replace("Z", "+00:00"))
+            data = [b for b in self.listed if datetime.fromisoformat(b["start"].replace("Z", "+00:00")) >= after]
+            return httpx.Response(200, json={"status": "success", "data": data,
+                                             "pagination": {"nextCursor": None, "hasMore": False}})
         if request.url.path == "/v2/bookings":
             body = json.loads(request.content)
             start = datetime.fromisoformat(body["start"].replace("Z", "+00:00"))
             if start.isoformat() in self.booked:
                 return httpx.Response(400, json={"status": "error", "error": {"message": "User either already has booking at this time or is not available"}})
             self.booked.add(start.isoformat())
+            self.listed.append({
+                "uid": f"bk-{len(self.booked)}", "start": body["start"],
+                "end": (start + timedelta(minutes=30)).isoformat().replace("+00:00", "Z"),
+                "status": "accepted", "eventTypeId": body.get("eventTypeId"),
+                "attendees": [{"email": body["attendee"]["email"], "name": body["attendee"]["name"]}],
+                "location": "https://cal.video/abc"})
             return httpx.Response(201, json={"status": "success", "data": {
                 "id": 1, "uid": f"bk-{len(self.booked)}", "start": body["start"],
                 "end": (start + timedelta(minutes=30)).isoformat().replace("+00:00", "Z"),
@@ -65,7 +77,7 @@ class FakeCalCom:
 
 def calcom(server=None):
     server = server or FakeCalCom()
-    provider = CalComProvider(api_key="cal_live_test", event_type_id=42, booking_url="https://cal.com/alex/30min",
+    provider = CalComProvider(api_key="cal_live_test", event_type=42, booking_url="https://cal.com/alex/30min",
                               transport=httpx.MockTransport(server))
     return provider, server
 
@@ -99,6 +111,12 @@ async def test_contract_slots_book_and_conflict(name):
     assert err.value.slot_taken
     assert first.start not in [s.start for s in await cal.free_slots(MON, MON + timedelta(days=5))]
     assert cal.booking_link()
+
+    # The booking can be read back (this is how link bookings are found).
+    [seen] = await cal.list_bookings(MON)
+    assert (seen.external_id, seen.start, seen.status) == (booking.external_id, first.start, "booked")
+    assert (seen.attendee_email, seen.attendee_name, seen.ours) == (DANA.email, DANA.name, True)
+    assert await cal.list_bookings(first.start + timedelta(minutes=1)) == []
 
 
 # --- Cal.com specifics --------------------------------------------------------------
@@ -161,3 +179,89 @@ def test_describe_and_find_slot():
     assert describe_slot(slot, "Europe/London") == "Tuesday 6 October, 11:00-11:30 (Europe/London)"
     assert find_slot([slot], slot.start + timedelta(seconds=30)) == slot
     assert find_slot([slot], slot.start + timedelta(minutes=30)) is None
+
+
+# --- configuration --------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_calcom_by_slug_uses_username_from_booking_url():
+    server = FakeCalCom()
+    cal = CalComProvider(api_key="k", event_type="ai-cold-email-init",
+                         booking_url="https://cal.com/arafat/ai-cold-email-init",
+                         transport=httpx.MockTransport(server))
+    await cal.free_slots(MON, MON + timedelta(days=1))
+    params = dict(server.requests[-1].url.params)
+    assert (params["eventTypeSlug"], params["username"]) == ("ai-cold-email-init", "arafat")
+    assert "eventTypeId" not in params
+    await cal.book(MON + timedelta(hours=10), DANA)
+    body = json.loads(server.requests[-1].content)
+    assert (body["eventTypeSlug"], body["username"]) == ("ai-cold-email-init", "arafat")
+
+
+def test_calcom_slug_without_username_is_a_clear_error():
+    with pytest.raises(CalendarError, match="CALCOM_USERNAME"):
+        CalComProvider(api_key="k", event_type="ai-cold-email-init")
+    assert CalComProvider(api_key="k", event_type="30min", username="arafat")._event == {
+        "eventTypeSlug": "30min", "username": "arafat"}
+    assert CalComProvider(api_key="k", event_type=" 42 ")._event == {"eventTypeId": 42}
+
+
+def test_bad_calendar_settings_never_stop_the_app(monkeypatch):
+    """Empty or non-numeric values used to crash Settings at startup."""
+    from app.config import Settings
+    for value in ("", "ai-cold-email-init", "1234567"):
+        monkeypatch.setenv("CALCOM_EVENT_TYPE_ID", value)
+        monkeypatch.setenv("CALCOM_BOOKING_URL", "")
+        s = Settings()
+        assert s.calcom_event_type_id == value
+        assert s.calcom_booking_url == ""
+
+
+@pytest.mark.anyio
+async def test_calcom_booking_list_request_statuses_and_paging():
+    pages = [
+        {"data": [
+            {"uid": "a", "start": "2026-10-06T03:15:00.000Z", "end": "2026-10-06T03:30:00.000Z",
+             "status": "accepted", "eventTypeId": 42, "location": "https://app.cal.com/video/a",
+             "attendees": [{"email": "lead@x.com", "name": "Lea", "timeZone": "Asia/Dhaka"}]},
+            {"uid": "b", "start": "2026-10-07T03:00:00.000Z", "end": "2026-10-07T03:15:00.000Z",
+             "status": "awaiting_host", "eventTypeId": 99, "location": "integrations:daily",
+             "attendees": [{"email": "other@y.com", "name": "O"}]},
+            {"uid": "no-start"},
+        ], "pagination": {"nextCursor": "c2", "hasMore": True}},
+        {"data": [
+            {"uid": "c", "start": "2026-10-08T03:00:00Z", "end": "2026-10-08T03:15:00Z",
+             "status": "cancelled", "eventTypeId": 42, "attendees": []},
+        ], "pagination": {"nextCursor": None, "hasMore": False}},
+    ]
+    seen: list[httpx.Request] = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={"status": "success", **pages[len(seen) - 1]})
+
+    cal = CalComProvider("k", 42, transport=httpx.MockTransport(handler))
+    got = await cal.list_bookings(MON)
+    assert seen[0].headers["cal-api-version"] == "2026-05-01"
+    assert dict(seen[0].url.params) == {"afterStart": "2026-10-05T00:00:00Z", "sortStart": "asc", "limit": "100"}
+    assert seen[1].url.params["cursor"] == "c2"
+    assert [(b.external_id, b.status, b.ours) for b in got] == [
+        ("a", "booked", True), ("b", "pending", False), ("c", "cancelled", True)]
+    assert (got[0].attendee_email, got[0].meeting_url) == ("lead@x.com", "https://app.cal.com/video/a")
+    assert got[1].meeting_url is None and got[2].attendee_email is None
+
+
+@pytest.mark.anyio
+async def test_a_booking_in_the_past_counts_as_taken():
+    cal = CalComProvider("k", 1, transport=httpx.MockTransport(lambda r: httpx.Response(
+        400, json={"error": {"message": "Attempting to book a meeting in the past."}})))
+    with pytest.raises(CalendarError) as err:
+        await cal.book(MON, DANA)
+    assert err.value.slot_taken
+
+
+def test_pick_near_prefers_the_same_day_and_closest_time():
+    slots = _slots(10, 14, 15) + _slots(16, day_offset=1)
+    wanted = MON + timedelta(hours=17)
+    near = pick_near(slots, wanted, "UTC", HOURS, MON - timedelta(days=1), count=2, min_notice_hours=0)
+    assert [s.start.hour for s in near] == [14, 15]

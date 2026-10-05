@@ -24,11 +24,13 @@ def _build(name: str) -> Optional[CalendarProvider]:
 
         return CalComProvider(
             api_key=s.calcom_api_key,
-            event_type_id=s.calcom_event_type_id,
+            event_type=s.calcom_event_type_id,
             booking_url=s.calcom_booking_url,
+            username=s.calcom_username,
             base_url=s.calcom_base_url,
             slots_version=s.calcom_slots_api_version,
             bookings_version=s.calcom_bookings_api_version,
+            list_version=s.calcom_list_bookings_api_version,
             timeout=s.calendar_timeout_seconds,
         )
     if name in ("google", "microsoft"):

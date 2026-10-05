@@ -21,7 +21,7 @@ from app import repository as repo
 from app import settings_store
 from app.calendar.base import Attendee, CalendarError, Slot
 from app.calendar.factory import get_calendar
-from app.calendar.slots import describe_slot, find_slot, pick_slots
+from app.calendar.slots import describe_slot, find_slot, pick_near, pick_slots
 from app.mail.base import Inbox, MailError, OutgoingMessage
 from app.mail.factory import get_sender
 from app.scheduling import advance_business_days, clamp_into_window, resolve_timezone
@@ -127,9 +127,17 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
     extracted = dict(result.extracted)
     done: list[str] = []
     meeting_cfg = cfg["meeting"]
-    calendar = get_calendar()
     draft_kind = plan.draft_kind
     needs_human = plan.needs_human
+    try:
+        calendar = get_calendar()
+    except CalendarError as exc:
+        # Misconfigured calendar (.env): carry on without it, and flag replies
+        # that needed it so a person books the meeting.
+        calendar = None
+        if any(a in plan.actions for a in ("offer_slots", "book_offered", "book_proposed")):
+            needs_human = True
+            done.append(f"calendar not usable ({exc})")
     slot_lines: list[str] = []
     new_offer: list[Slot] = []
     booked: Optional[str] = None
@@ -149,8 +157,11 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
             needs_human = True
             done.append(f"calendar unavailable ({exc})")
             return
-        new_offer = pick_slots(found, tz, hours, now, int(meeting_cfg["slots_to_offer"]),
-                               int(meeting_cfg["min_notice_hours"]))
+        count, notice = int(meeting_cfg["slots_to_offer"]), int(meeting_cfg["min_notice_hours"])
+        if around is not None:
+            new_offer = pick_near(found, around, tz, hours, now, count, notice)
+        if around is None or not new_offer:
+            new_offer = pick_slots(found, tz, hours, now, count, notice)
         slot_lines = [describe_slot(s, tz) for s in new_offer]
 
     async def book(slot: Slot) -> bool:
@@ -205,6 +216,12 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
                     continue
                 if action == "book_offered":
                     slot = offered[extracted["chosen_slot"] - 1]
+                    if slot.start <= now + timedelta(minutes=30):
+                        # They answered too late: that time has passed.
+                        await offer_slots()
+                        draft_kind = "slot_unavailable"
+                        done.append("the time they picked has passed: offered others")
+                        continue
                 else:
                     when = datetime.fromisoformat(extracted["proposed_time"])
                     try:

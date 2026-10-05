@@ -499,6 +499,26 @@ async def list_meetings(limit: int = 100) -> list[dict[str, Any]]:
     return await db.rows("list_meetings", p_limit=limit)
 
 
+async def sync_meeting(
+    provider: str, external_id: str, start_at: datetime, end_at: datetime | None, status: str,
+    attendee_email: str | None, attendee_name: str | None, meeting_url: str | None, ours: bool,
+) -> dict[str, Any]:
+    """Record a booking read from the calendar. Returns {outcome, lead_id}."""
+    return await db.rpc(
+        "sync_meeting", p_provider=provider, p_external_id=external_id, p_start_at=start_at,
+        p_end_at=end_at, p_status=status, p_attendee_email=attendee_email,
+        p_attendee_name=attendee_name, p_meeting_url=meeting_url, p_ours=ours,
+    ) or {}
+
+
+async def meetings_overview(limit: int = 100) -> list[dict[str, Any]]:
+    return await db.rows("meetings_overview", p_limit=limit)
+
+
+async def open_offers(limit: int = 50) -> list[dict[str, Any]]:
+    return await db.rows("open_offers", p_limit=limit)
+
+
 async def list_snoozed(limit: int = 100) -> list[dict[str, Any]]:
     return await db.rows("list_snoozed", p_limit=limit)
 

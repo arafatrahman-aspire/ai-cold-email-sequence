@@ -1,8 +1,9 @@
 """Calendar provider interface for meeting booking.
 
-Reply triage needs three things from a calendar: free slots in a window, a
-way to book one of them for a lead, and an optional public booking link the
-lead can use instead. Each provider (Cal.com today; Google Calendar or
+Reply triage needs four things from a calendar: free slots in a window, a
+way to book one of them for a lead, an optional public booking link the lead
+can use instead, and the bookings themselves, so a meeting booked through
+that link is recorded too. Each provider (Cal.com today; Google Calendar or
 Microsoft Graph later) implements this class, and ``CALENDAR_PROVIDER``
 picks one, the same way ``LLM_PROVIDER`` and ``MAIL_SENDER`` do.
 
@@ -59,6 +60,20 @@ class Booking:
     meeting_url: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class RemoteBooking:
+    """A booking as the calendar reports it, however it was made."""
+
+    external_id: str
+    start: datetime
+    end: datetime
+    status: str  # booked | pending (awaiting the host's confirmation) | cancelled
+    attendee_email: Optional[str] = None
+    attendee_name: Optional[str] = None
+    meeting_url: Optional[str] = None
+    ours: bool = False  # for the event type this app offers
+
+
 class CalendarProvider(abc.ABC):
     name: str
 
@@ -76,6 +91,14 @@ class CalendarProvider(abc.ABC):
     def booking_link(self) -> Optional[str]:
         """A page where the lead can pick a time themselves, if there is one."""
         return None
+
+    async def list_bookings(self, starting_after: datetime) -> list[RemoteBooking]:
+        """Bookings (including cancelled ones) that start after ``starting_after``.
+
+        A provider without a way to read bookings back returns [], and only
+        meetings booked from replies are recorded.
+        """
+        return []
 
     async def aclose(self) -> None:  # pragma: no cover - default no-op
         return None

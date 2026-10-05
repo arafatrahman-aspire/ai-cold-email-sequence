@@ -12,7 +12,7 @@ from datetime import datetime, time, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from app.calendar.base import Attendee, Booking, CalendarError, CalendarProvider, Slot
+from app.calendar.base import Attendee, Booking, CalendarError, CalendarProvider, RemoteBooking, Slot
 
 SLOT_HOURS = (10, 11, 14, 15)
 SLOT_MINUTES = 30
@@ -62,3 +62,16 @@ class FakeCalendar(CalendarProvider):
         self.bookings[slot_start] = booking
         self.attendees[booking.external_id] = attendee
         return booking
+
+    async def list_bookings(self, starting_after: datetime) -> list[RemoteBooking]:
+        out = []
+        for start, b in sorted(self.bookings.items()):
+            if start < starting_after:
+                continue
+            who = self.attendees.get(b.external_id)
+            out.append(RemoteBooking(
+                external_id=b.external_id, start=b.start, end=b.end, status="booked",
+                attendee_email=who.email if who else None, attendee_name=who.name if who else None,
+                meeting_url=b.meeting_url, ours=True,
+            ))
+        return out

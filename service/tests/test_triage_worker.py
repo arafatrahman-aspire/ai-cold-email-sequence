@@ -180,6 +180,32 @@ async def test_taken_slot_offers_new_ones(monkeypatch, db, calendar):
 
 
 @pytest.mark.anyio
+async def test_an_offered_time_that_has_passed_is_offered_again(monkeypatch, db, calendar):
+    past = (await calendar.free_slots(NOW - timedelta(days=1), NOW))[0]
+    db["context"]["offered_slots"] = [past.to_json()]
+    llm(monkeypatch, category="interested", chosen_slot=1)
+    await run(event("Option 1 please"))
+    assert not calendar.bookings and not calls(db, "record_meeting")
+    [d] = db["drafts"]
+    assert d["kind"] == "slot_unavailable" and len(d["offered"]) == 2
+    assert all(datetime.fromisoformat(s["start"]) > NOW for s in d["offered"])
+    assert "the time they picked has passed: offered others" in db["saved"]["extracted"]["actions"]
+
+
+@pytest.mark.anyio
+async def test_their_busy_time_gets_the_nearest_free_ones(monkeypatch, db, calendar):
+    # Wednesday 17:00 is not a slot (the fake calendar has 10, 11, 14, 15).
+    wanted = NOW.replace(hour=17) + timedelta(days=2)
+    llm(monkeypatch, category="interested", proposed_time=wanted.isoformat())
+    await run(event("Wednesday 5pm?"))
+    assert not calendar.bookings
+    [d] = db["drafts"]
+    assert d["kind"] == "slot_unavailable"
+    assert [s["start"] for s in d["offered"]] == [
+        wanted.replace(hour=14).isoformat(), wanted.replace(hour=15).isoformat()]
+
+
+@pytest.mark.anyio
 async def test_low_confidence_never_books_or_auto_sends(monkeypatch, db, calendar):
     db["context"]["offered_slots"] = [s.to_json() for s in (await calendar.free_slots(NOW + timedelta(days=1), NOW + timedelta(days=2)))[:2]]
     llm(monkeypatch, category="interested", chosen_slot=1, confidence=0.4)

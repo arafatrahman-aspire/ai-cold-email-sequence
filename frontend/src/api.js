@@ -110,6 +110,7 @@ export const api = {
   approveDraft: (id) => request('POST', `/triage/drafts/${encodeURIComponent(id)}/approve`),
   rejectDraft: (id) => request('POST', `/triage/drafts/${encodeURIComponent(id)}/reject`),
   meetings: () => request('GET', '/triage/meetings'),
+  syncCalendar: () => request('POST', '/run/calendar-sync'),
   snoozed: () => request('GET', '/triage/snoozed'),
   evaluate: () => request('POST', '/triage/evaluate'),
   evaluation: () => request('GET', '/triage/evaluation'),

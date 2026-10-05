@@ -22,7 +22,9 @@ load_dotenv(".env", override=False)
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+        env_file=".env", env_file_encoding="utf-8", extra="ignore",
+        # NAME= with no value means 'not set' (use the default), not ''.
+        env_ignore_empty=True,
     )
 
     # --- Database (Supabase REST API) --------------------------------------
@@ -91,12 +93,18 @@ class Settings(BaseSettings):
     calendar_provider: Literal["none", "fake", "calcom", "google", "microsoft"] = "none"
     calendar_timeout_seconds: float = 20.0
     calcom_api_key: str = ""
-    calcom_event_type_id: int = 0
+    # The event type's number (e.g. 1234567) or its slug (e.g. 30min). A slug
+    # also needs the Cal.com username: CALCOM_USERNAME, or taken from
+    # CALCOM_BOOKING_URL (https://cal.com/<username>/<slug>).
+    calcom_event_type_id: str = ""
+    calcom_username: str = ""
     # Public booking page to put in emails, e.g. https://cal.com/you/30min
     calcom_booking_url: str = ""
     calcom_base_url: str = "https://api.cal.com"
     calcom_slots_api_version: str = "2024-09-04"
     calcom_bookings_api_version: str = "2026-02-25"
+    # Reading bookings back (meetings booked through the link).
+    calcom_list_bookings_api_version: str = "2026-05-01"
     # Fake calendar: meeting length and the host's working timezone.
     fake_calendar_timezone: str = "UTC"
     fake_calendar_booking_url: str = "https://cal.example.com/demo/30min"
@@ -107,6 +115,7 @@ class Settings(BaseSettings):
     send_interval_seconds: int = 180
     poll_interval_seconds: int = 600  # reply check: every 10 minutes
     triage_interval_seconds: int = 60
+    calendar_sync_interval_seconds: int = 300  # pick up meetings booked through the link
 
     # --- Misc ---------------------------------------------------------------
     dry_run: bool = False

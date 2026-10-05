@@ -386,12 +386,22 @@ quoted text removed), so short replies like "yes, Tuesday works" make sense.
 The number is "Earlier emails the AI reads" in Reply triage → Settings.
 
 **Setup**
-1. Run `supabase/migrations/0006_triage.sql`, then `0007_conversation.sql`,
-   in the Supabase SQL Editor.
+1. Run `supabase/migrations/0006_triage.sql`, then `0007_conversation.sql`
+   and `0008_meeting_sync.sql`, in the Supabase SQL Editor.
 2. In `.env`, set `CALENDAR_PROVIDER=calcom` with `CALCOM_API_KEY`,
    `CALCOM_EVENT_TYPE_ID` and `CALCOM_BOOKING_URL` (or `fake` to try it
    without Cal.com), then restart the backend.
 3. Check it under **Reply triage → Settings → Calendar → Check free times**.
+
+**Meetings booked through the link**: every 5 minutes the calendar sync
+reads Cal.com's bookings. A booking by one of your leads (or anyone, for the
+event type in `CALCOM_EVENT_TYPE_ID`) appears on the Meetings page, stops
+that lead's sequence and cancels unsent replies; a cancellation puts the lead
+back to "replied". **Check calendar now** on the Meetings page runs it at once.
+
+**Drafts never invent a meeting**: an AI reply that names a time we did not
+offer, or promises a link or invite with nothing booked, is replaced by the
+plain template.
 
 **Accuracy**: Reply triage → Accuracy runs the 50 labelled replies in
 `service/app/triage/testset.jsonl` through the classifier (target 95%). From

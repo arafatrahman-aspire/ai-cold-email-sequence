@@ -60,6 +60,25 @@ def pick_slots(
     return sorted(chosen, key=lambda s: s.start)
 
 
+def pick_near(
+    slots: list[Slot],
+    around: datetime,
+    lead_timezone: Optional[str],
+    hours: BusinessHours,
+    now: datetime,
+    count: int = 2,
+    min_notice_hours: int = 12,
+) -> list[Slot]:
+    """Up to ``count`` slots closest to the time the lead asked for, the same
+    day first ("Tuesday 5pm" is not free -> Tuesday 4pm, not next Friday)."""
+    tz = resolve_timezone(lead_timezone)
+    earliest = now + timedelta(hours=min_notice_hours)
+    wanted_day = around.astimezone(tz).date()
+    usable = [s for s in slots if s.start >= earliest and _fits(s, tz, hours)]
+    usable.sort(key=lambda s: (s.start.astimezone(tz).date() != wanted_day, abs(s.start - around)))
+    return sorted(usable[:count], key=lambda s: s.start)
+
+
 def describe_slot(slot: Slot, lead_timezone: Optional[str]) -> str:
     """'Tuesday 6 October, 10:00-10:30 (Asia/Dhaka)' in the lead's time."""
     tz = resolve_timezone(lead_timezone)

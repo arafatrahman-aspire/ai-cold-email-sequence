@@ -37,7 +37,7 @@ async def test_reply_check_runs_at_start_then_every_ten_minutes(monkeypatch):
         next_run = datetime.fromisoformat(status["poller"]["next_run"])
         wait = (next_run - datetime.now(timezone.utc)).total_seconds()
         assert 590 <= wait <= 600, f"next check should be ~10 min away, got {wait:.0f}s"
-        assert set(status) == {"intake", "sender", "poller", "triage"}
+        assert set(status) == {"intake", "sender", "poller", "triage", "calendar"}
     finally:
         scheduler.shutdown()
     assert scheduler.status() == {}

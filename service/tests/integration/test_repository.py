@@ -458,7 +458,8 @@ async def test_triage_database_functions(database):
                                  now - timedelta(minutes=1))
     statuses = {r["id"]: r["status"] for r in await repo.list_drafts(None)}
     assert (statuses[d1], statuses[d2]) == ("cancelled", "pending")
-    assert (await repo.triage_context(lead_id))["offered_slots"] == [slot]
+    # Times count as offered only once the reply has gone out.
+    assert (await repo.triage_context(lead_id))["offered_slots"] == []
     assert await repo.update_draft(d2, "Re: hi", "edited") is True
 
     # d2 is past its auto-send time, so it is claimed exactly once.
@@ -467,6 +468,7 @@ async def test_triage_database_functions(database):
     assert claimed["references_ids"] == ["<m1@x>", "<r1@x>"]
     assert await repo.claim_drafts_to_send(10) == []
     await repo.finish_draft(d2, "sent", message_id="<sent-d2@x>")
+    assert (await repo.triage_context(lead_id))["offered_slots"] == [slot]
     assert await repo.update_draft(d2, "x", "y") is False
     assert await repo.decide_draft(d2, "approve", "me") is False
     # Replies to our draft thread back to the lead.
@@ -586,3 +588,78 @@ async def test_conversation_history(database):
     last2 = await repo.conversation_history(lead_id, newest["received_at"], newest["id"], 2)
     assert [h["body"] for h in last2] == ["What does it cost?", "About EUR 8 per seat."]
     assert await repo.conversation_history(lead_id, newest["received_at"], newest["id"], 0) == []
+
+
+@pytest.mark.anyio
+async def test_meetings_booked_through_the_link(database):
+    """Calendar sync: a lead's own booking stops their sequence; cancellations
+    and strangers are handled; triage's own bookings are not duplicated."""
+    from app import repository as repo
+
+    pg = database
+    inbox_id = await _seed(pg)
+    now = datetime.now(timezone.utc)
+    for lid in ("L-1", "L-5"):
+        assert (await repo.enroll_lead(lid, CONTACTABLE, True))[0] == "enrolled"
+    lead = str(await pg.fetchval("select id from public.leads where lead_id='L-1'"))
+    other = str(await pg.fetchval("select id from public.leads where lead_id='L-5'"))
+    emails = [{"step_number": i, "subject": f"s{i}", "body": "b"} for i in (1, 2)]
+    await repo.store_sequence(lead, "ciso", "keyword", "g", "m", emails,
+                              [now + timedelta(hours=1), now + timedelta(days=3)])
+
+    # The lead was offered times; the offer is open until they act.
+    await repo.record_inbox_event(inbox_id, lead, "reply", "ciso@example.com", "o@x",
+                                  "Re: hi", "<r1@x>", None, "Interested", now - timedelta(hours=2))
+    [ev] = await repo.list_inbox_events(["reply"], 10)
+    slot = {"start": (now + timedelta(days=1)).isoformat(), "end": (now + timedelta(days=1, minutes=30)).isoformat()}
+    offer = await repo.create_draft(ev["id"], lead, inbox_id, "meeting_offer", "ciso@example.com",
+                                    "Re: hi", "times", [slot], None, [], None)
+    await pg.execute("update cold_email.reply_drafts set status='sent', sent_at=now() - interval '1 hour'"
+                     " where id=$1::uuid", offer)
+    pending = await repo.create_draft(ev["id"], lead, inbox_id, "objection_reply", "ciso@example.com",
+                                      "Re: hi", "b", [], None, [], None)
+    [open_offer] = await repo.open_offers()
+    assert (open_offer["lead_id"], open_offer["offered_slots"]) == (lead, [slot])
+
+    start, end = now + timedelta(days=2), now + timedelta(days=2, minutes=15)
+    # They book through the link (address in a different case).
+    r = await repo.sync_meeting("calcom", "uid-1", start, end, "booked", "CISO@Example.com", "Dana O",
+                                "https://app.cal.com/video/uid-1", False)
+    assert r == {"outcome": "new", "lead_id": lead}
+    assert (await repo.lead_for_step(lead))["status"] == "meeting_booked"
+    assert await pg.fetchval("select count(*) from cold_email.emails where lead_id=$1::uuid and status='pending'", lead) == 0
+    assert await pg.fetchval("select status from cold_email.reply_drafts where id=$1::uuid", pending) == "cancelled"
+    assert await repo.open_offers() == []
+    assert (await repo.triage_context(lead))["has_meeting"] is True
+    again = await repo.sync_meeting("calcom", "uid-1", start, end, "booked", "ciso@example.com", "Dana O",
+                                    "https://app.cal.com/video/uid-1", False)
+    assert again["outcome"] == "unchanged"
+
+    # Strangers are kept only for our own event type; unseen cancellations are skipped.
+    assert (await repo.sync_meeting("calcom", "uid-2", start, end, "booked", "x@y.com", "X", None, False))["outcome"] == "ignored"
+    assert (await repo.sync_meeting("calcom", "uid-3", start, end, "booked", "x@y.com", "X", None, True))["outcome"] == "new"
+    assert (await repo.sync_meeting("calcom", "uid-4", start, end, "cancelled", "auto@example.com", "K", None, True))["outcome"] == "ignored"
+    assert (await repo.lead_for_step(other))["status"] != "meeting_booked"
+
+    # Triage books, the sync sees it too: one row, credited to the reply.
+    await repo.record_meeting(lead, ev["id"], "calcom", "uid-5", start + timedelta(days=1),
+                              end + timedelta(days=1), "ciso@example.com", None)
+    assert (await repo.sync_meeting("calcom", "uid-5", start + timedelta(days=1), end + timedelta(days=1),
+                                    "booked", "ciso@example.com", "Dana O", "https://v/5", True))["outcome"] == "updated"
+
+    rows = {m["external_id"]: m for m in await repo.meetings_overview()}
+    assert set(rows) == {"uid-1", "uid-3", "uid-5"}
+    assert (rows["uid-1"]["source"], rows["uid-1"]["attendee_name"], rows["uid-1"]["lead_status"]) == ("link", "Dana O", "meeting_booked")
+    assert (rows["uid-5"]["source"], str(rows["uid-5"]["event_id"]), rows["uid-5"]["meeting_url"]) == ("reply", str(ev["id"]), "https://v/5")
+    assert rows["uid-3"]["lead_id"] is None
+
+    # Cancelling one keeps the lead booked while another is still coming up...
+    assert (await repo.sync_meeting("calcom", "uid-1", start, end, "cancelled", "ciso@example.com", None, None, False))["outcome"] == "cancelled"
+    assert (await repo.lead_for_step(lead))["status"] == "meeting_booked"
+    # ...and the last cancellation puts them back to "replied".
+    await repo.sync_meeting("calcom", "uid-5", start + timedelta(days=1), end + timedelta(days=1), "cancelled",
+                            "ciso@example.com", None, None, True)
+    assert (await repo.lead_for_step(lead))["status"] == "replied"
+    assert (await repo.triage_context(lead))["has_meeting"] is False
+    stats = await repo.triage_stats()
+    assert (stats["meeting_leads"], stats["meetings_upcoming"]) == (0, 1)   # uid-3 (a stranger) remains
