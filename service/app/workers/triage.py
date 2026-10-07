@@ -24,6 +24,7 @@ from app.calendar.factory import get_calendar
 from app.calendar.slots import describe_slot, find_slot, pick_near, pick_slots
 from app.mail.base import Inbox, MailError, OutgoingMessage
 from app.mail.factory import get_sender
+from app.nurture import replies as nurture_replies
 from app.scheduling import advance_business_days, clamp_into_window, resolve_timezone
 from app.triage.conversation import format_history, strip_quoted
 from app.triage.drafting import DraftInput, write_draft
@@ -367,6 +368,11 @@ async def run_once() -> dict[str, Any]:
             log.exception("triage of reply %s crashed", event.get("id"))
             outcome = "deferred"
         stats[outcome] = stats.get(outcome, 0) + 1
+
+    # Replies to Email Nurture emails: same classifier, nurture's own actions
+    # (no reply drafts). Never raises.
+    for key, value in (await nurture_replies.triage_pending(cfg)).items():
+        stats[f"nurture_{key}"] = value
 
     if bool(await settings_store.get("sequence_enabled")):
         for k, v in (await send_due_drafts(inboxes)).items():

@@ -59,6 +59,9 @@ In Supabase → **SQL Editor**, run these files **in order**. Each one is safe t
 | 6 | `supabase/migrations/0006_triage.sql` | — |
 | 7 | `supabase/migrations/0007_conversation.sql` | — |
 | 8 | `supabase/migrations/0008_meeting_sync.sql` | — |
+| 9 | `supabase/migrations/0009_lead_browser.sql` | — |
+| 10 | `supabase/migrations/0010_nurture.sql` | — (Email Nurture: 3 tables and their functions) |
+| 11 | `supabase/migrations/0011_nurture_and_cold.sql` | — (one sequence at a time: the only change to cold functions) |
 
 Then: **Project Settings → Data API → Exposed schemas → add `cold_email` → Save.**
 (If you skip this, every call fails with a message telling you to do it.)
@@ -178,9 +181,20 @@ A 5-minute routine:
 
 ### 4.1 Enroll leads
 
-**Console → Enroll**: paste `lead_id`s. Add a job title if the shared data lacks
-one, because the job title decides the persona. The result shows why any lead was
-refused:
+**Console → Enroll** lists every lead in the shared `leads` table with its
+cold-sequence state. Search by name, email, company, job title or lead ID, and
+filter with the chips (Ready to enroll, In sequence, Finished, ...).
+
+- **Enroll** starts the sequence (drafted within 5 minutes).
+- **Remove** takes a lead out: emails not sent yet and unsent reply drafts are
+  cancelled; what was sent stays in the history. The lead shows as *Stopped*
+  and has **Enroll again**, which drafts a fresh sequence from the first email.
+  While a sequence is being drafted (a few seconds) Remove waits; try again.
+- Tick several leads to enroll or remove them together.
+
+A lead that cannot be enrolled shows why instead of a button. To correct a
+job title, company or timezone at enrollment (the job title decides the
+persona), open **Enroll by ID, with corrections** at the bottom. Reasons:
 
 | Result | Fix |
 |---|---|
@@ -190,10 +204,13 @@ refused:
 | In another email journey | It's in `email_nurture_state`; this is intentional to avoid double emailing |
 | On suppression list | It was blocked/unsubscribed/bounced; leave it |
 | Already enrolled | Nothing to do |
+| Same email already enrolled | Another lead with this address is in the sequence; one sequence per address |
 
 Terminal:
 ```bash
 api -X POST localhost:8080/enroll -d '{"leads":[{"lead_id":"L-1042","job_title":"Head of IT"}]}'
+api "localhost:8080/leads?view=available&search=acme"          # browse
+api -X POST localhost:8080/enrollments/remove -d '{"lead_ids":["<leads.id uuid>"]}'
 ```
 
 ### 4.2 Turn on auto-enroll
@@ -284,6 +301,37 @@ It applies to sequences drafted **after** the change.
 other safety check still applies, and leads emailed in the last 24 hours are
 skipped. Useful for testing, not for daily use.
 
+### 4.11 Email Nurture
+
+**First run, step by step (test mode):**
+1. Run migrations 0010 and 0011; set the `NURTURE_*` values in `.env`; restart.
+2. Email Nurture → Settings: set the pricing (and demo) link, the company
+   address, the sales email; turn **Test mode** on (1 minute per day) and add
+   your own addresses to the test list.
+3. Give a test lead (with one of those addresses) a Warm or Cold score in the
+   shared tables. Within 5 minutes it is enrolled; email 1 arrives within a
+   minute or two, the rest over about 30 minutes.
+4. Click the pricing link in one email: the lead appears under **Hand-offs**
+   and the sales email gets a summary. Reply "interested" to another: same.
+5. Turn test mode off before real leads are enrolled.
+
+**Leads already Warm or Cold** when nurture is first switched on are not
+enrolled automatically (only score *changes* are). To start them: Email
+Nurture → Leads → **Enroll eligible leads**.
+
+**Review**: Settings → Review → *Pilot mode* holds every AI draft until a
+person approves it in the **Review** tab. Rejecting a draft has it written
+again; after two rejections the pre-approved fallback is used.
+
+**Run a nurture job now**:
+```bash
+api -X POST localhost:8080/nurture/run/score      # look for score changes
+api -X POST localhost:8080/nurture/run/generate   # write emails due within a day
+api -X POST localhost:8080/nurture/run/send       # send what is due
+api -X POST localhost:8080/nurture/run/poll       # read nurture's mailbox (bounces)
+api -X POST localhost:8080/nurture/run/reconcile  # the hourly catch-up
+```
+
 ### 4.10 Run a worker immediately
 
 **Overview** buttons, or:
@@ -365,6 +413,22 @@ Check in this order:
 | A lead booked through the link but it is missing | Press **Check calendar now**. Bookings for other event types only appear when the attendee's address is one of your leads |
 | Error mentioning `meetings_overview` | Run `0008_meeting_sync.sql` |
 
+### Nurture isn't sending
+
+Email Nurture → **Dashboard** shows a red **Not sending** box listing exactly
+what is missing. The usual ones:
+
+| Message | Fix |
+|---|---|
+| `NURTURE_FROM_EMAIL is not set` / `NURTURE_SMTP_PASSWORD is not set` | Nurture's own Gmail and its app password in `.env`, then restart |
+| `NURTURE_FROM_EMAIL is a cold-sequence inbox` | Use a different account: nurture must not share a cold inbox |
+| `No pricing link` / `No demo link` | Email Nurture → Settings → Branding and links |
+| `No reply-to address` | Set `NURTURE_REPLY_TO` or add an active cold inbox |
+
+Other reasons an email waits: test mode is on and the lead is not on the
+allow-list; it is outside the sending window in the lead's timezone; the
+daily limit is reached; pilot mode is on and the draft is in **Review**.
+
 ### Drafting fails
 
 | Symptom | Cause and fix |
@@ -414,6 +478,13 @@ Any one of these works. The first is fastest and needs no restart:
 4. `docker compose down` (stops everything, including reply detection)
 
 This takes effect within about a minute (settings cache). Turn it back on the same way with `true`.
+
+### Stop all nurture emails
+
+Email Nurture → **Settings** → switch **Email Nurture** off. Nothing is written
+or sent from the next cycle (within a minute). Replies and unsubscribes are
+still handled. `NURTURE_WORKERS=false` in `.env` plus a restart stops its jobs
+entirely.
 
 ### Stop one lead or company
 

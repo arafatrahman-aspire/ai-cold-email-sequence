@@ -48,6 +48,14 @@ DEFAULTS: dict[str, Any] = {
         "context_messages": 4,
         "meeting": {"slots_to_offer": 2, "days_ahead": 7, "min_notice_hours": 12},
     },
+    # Email Nurture: stored overrides only; defaults in app.nurture.options
+    # and app.nurture.content.
+    "nurture": {},
+    "nurture_briefs": {},
+    "nurture_fallbacks": {},
+    "nurture_resources": [],
+    # When lead scores were last checked (None until the first check).
+    "nurture_scores_seen_at": None,
 }
 
 

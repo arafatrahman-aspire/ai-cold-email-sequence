@@ -96,6 +96,9 @@ export const api = {
   upcoming: (limit = 8) => request('GET', `/upcoming?limit=${limit}`),
   enrollments: (statuses) =>
     request('GET', `/enrollments${statuses ? `?status=${encodeURIComponent(statuses.join(','))}` : ''}`),
+  leads: ({ search = '', view = 'all', limit = 50, offset = 0 } = {}) =>
+    request('GET', `/leads?${new URLSearchParams({ search, view, limit, offset })}`),
+  removeFromSequence: (leadIds) => request('POST', '/enrollments/remove', { lead_ids: leadIds }),
   retry: (leadId, overrides) =>
     request('POST', `/enrollments/${encodeURIComponent(leadId)}/retry`, overrides || {}),
 
@@ -116,4 +119,37 @@ export const api = {
   evaluation: () => request('GET', '/triage/evaluation'),
   calendarStatus: () => request('GET', '/calendar/status'),
   calendarSlots: (tz) => request('GET', `/calendar/slots?timezone_name=${encodeURIComponent(tz)}`),
+
+  // Email Nurture
+  nurtureStatus: () => request('GET', '/nurture/status'),
+  nurtureStats: (start, end) => request('GET', `/nurture/stats?${query({ start, end })}`),
+  nurtureEnrollments: (params) => request('GET', `/nurture/enrollments?${query(params)}`),
+  nurtureEnrollment: (id) => request('GET', `/nurture/enrollments/${encodeURIComponent(id)}`),
+  nurtureAction: (id, action, body) =>
+    request('POST', `/nurture/enrollments/${encodeURIComponent(id)}/${action}`, body),
+  nurtureEligible: () => request('GET', '/nurture/eligible'),
+  nurtureEnroll: (body) => request('POST', '/nurture/enroll', body),
+  nurtureReview: () => request('GET', '/nurture/review'),
+  nurtureEditMessage: (id, edit) => request('PUT', `/nurture/messages/${encodeURIComponent(id)}`, edit),
+  nurtureDecide: (id, decision) => request('POST', `/nurture/messages/${encodeURIComponent(id)}/${decision}`),
+  nurtureHandoffs: () => request('GET', '/nurture/handoffs'),
+  nurtureBriefs: () => request('GET', '/nurture/content/briefs'),
+  nurtureSaveBrief: (brief) => request('PUT', '/nurture/content/briefs', brief),
+  nurtureFallbacks: () => request('GET', '/nurture/content/fallbacks'),
+  nurtureSaveFallback: (fallback) => request('PUT', '/nurture/content/fallbacks', fallback),
+  nurtureResources: () => request('GET', '/nurture/content/resources'),
+  nurtureAddResource: (r) => request('POST', '/nurture/content/resources', r),
+  nurtureEditResource: (id, r) => request('PUT', `/nurture/content/resources/${encodeURIComponent(id)}`, r),
+  nurtureDeleteResource: (id) => request('DELETE', `/nurture/content/resources/${encodeURIComponent(id)}`),
+  nurtureAutoTag: () => request('POST', '/nurture/content/resources/auto-tag'),
+  nurtureSettings: () => request('GET', '/nurture/settings'),
+  nurtureSaveSettings: (changes) => request('PUT', '/nurture/settings', changes),
+  nurtureRun: (job) => request('POST', `/nurture/run/${job}`),
+}
+
+// Query string from an object, leaving out empty values.
+function query(params = {}) {
+  const out = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') out.set(k, v)
+  return out.toString()
 }

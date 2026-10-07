@@ -17,6 +17,7 @@ from app.workers import alerts
 from app.mail import parsing
 from app.mail.base import Inbox, IncomingMessage, MailError
 from app.mail.factory import get_reader
+from app.nurture import replies as nurture_replies
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +60,13 @@ def _classify(message: IncomingMessage) -> str:
 
 async def _handle(inbox: Inbox, message: IncomingMessage) -> str:
     event_type = _classify(message)
+
+    # Email Nurture: a reply or bounce about a nurture email is handled there.
+    # Anything else (or any nurture error) continues exactly as before.
+    handled = await nurture_replies.handle_inbound(inbox, message, event_type)
+    if handled:
+        return handled
+
     lead_id = await _match_lead(message)
 
     # Mail that is not about an enrolled lead is none of our business: it is

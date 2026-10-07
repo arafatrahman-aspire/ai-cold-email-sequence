@@ -20,6 +20,9 @@ class Completion:
     text: str
     model: str
     provider: str
+    # Token usage when the provider reports it (for cost tracking).
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class LLMClient(abc.ABC):

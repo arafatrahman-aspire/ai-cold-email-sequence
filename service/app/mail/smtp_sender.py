@@ -41,13 +41,22 @@ def build_mime(inbox: Inbox, message: OutgoingMessage, message_id: str) -> Email
     if message.references:
         msg["References"] = " ".join(message.references)
 
-    if message.unsubscribe_mailto:
+    if message.unsubscribe_url:
+        # RFC 8058 one-click: the mail client POSTs to the URL.
+        targets = [f"<{message.unsubscribe_url}>"]
+        if message.unsubscribe_mailto:
+            targets.append(f"<mailto:{message.unsubscribe_mailto}>")
+        msg["List-Unsubscribe"] = ", ".join(targets)
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+    elif message.unsubscribe_mailto:
         # RFC 8058: the mailto form works without a hosted landing page, and
         # mailbox providers weight its presence positively.
         msg["List-Unsubscribe"] = f"<mailto:{message.unsubscribe_mailto}>"
         msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
 
     msg.set_content(message.body_text)
+    if message.body_html:
+        msg.add_alternative(message.body_html, subtype="html")
     return msg
 
 

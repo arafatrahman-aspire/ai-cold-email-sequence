@@ -7,6 +7,8 @@ on demand (useful for testing personas without touching lead data).
 
 from __future__ import annotations
 
+import asyncio
+
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -27,6 +29,7 @@ from app.mail.base import IncomingMessage, MailError, OutgoingMessage
 from app.mail.factory import close_transports, get_sender
 from app.calendar.base import CalendarError
 from app.calendar.factory import close_calendar, get_calendar
+from app.nurture import api as nurture_api
 from app.workers import alerts, calendar_sync, intake, poller, scheduler, sender
 from app.workers import triage as triage_worker
 
@@ -80,6 +83,10 @@ app.include_router(session_auth.router, prefix="/auth")
 # for scripts). Only /health stays open, for the container healthcheck.
 require_user = session_auth.require_session
 
+# Email Nurture: public click / unsubscribe pages (no login) and the console API.
+app.include_router(nurture_api.public_router())
+app.include_router(nurture_api.console_router(require_user))
+
 
 # ---------------------------------------------------------------------------
 # Models
@@ -119,6 +126,10 @@ class EnrollItem(BaseModel):
 
 class EnrollRequest(BaseModel):
     leads: list[EnrollItem] = Field(min_length=1, max_length=500)
+
+
+class RemoveRequest(BaseModel):
+    lead_ids: list[UUID] = Field(min_length=1, max_length=500)
 
 
 class RetryRequest(BaseModel):
@@ -227,6 +238,47 @@ async def enroll(request: EnrollRequest) -> dict:
         results.append({"lead_id": item.lead_id, "id": lead_uuid, "outcome": outcome})
     enrolled = sum(1 for r in results if r["outcome"] == "enrolled")
     return {"enrolled": enrolled, "results": results}
+
+
+@app.get("/leads", dependencies=[Depends(require_user)])
+async def browse_leads(
+    search: Optional[str] = None, view: str = "all", source: Optional[str] = None,
+    limit: int = 50, offset: int = 0,
+) -> dict:
+    """The shared leads, newest first, with their cold-sequence state.
+
+    ``view``: all | not_enrolled | available | in_sequence | finished. Each
+    lead not yet enrolled carries ``blocked`` (why it cannot be) or null.
+    ``counts`` gives every view's size for the same search.
+    """
+    if view not in repo.LEAD_VIEWS:
+        raise HTTPException(status_code=422, detail=f"view must be one of: {', '.join(repo.LEAD_VIEWS)}")
+    contactable = await settings_store.contactable_statuses()
+    skip_nurture = bool(await settings_store.get("skip_if_in_email_nurture"))
+    search = (search or "").strip()[:100] or None
+
+    async def page(v: str, n: int, skip: int):
+        return await repo.browse_leads(search, v, source, contactable, skip_nurture, n, skip)
+
+    (leads, total), *others = await asyncio.gather(
+        page(view, max(1, min(limit, 200)), max(0, offset)),
+        *(page(v, 1, 0) for v in repo.LEAD_VIEWS),
+    )
+    return {"leads": leads, "total": total,
+            "counts": {v: t for v, (_, t) in zip(repo.LEAD_VIEWS, others)}}
+
+
+@app.post("/enrollments/remove")
+async def remove_from_sequence(request: RemoveRequest, user: dict = Depends(require_user)) -> dict:
+    """Take leads out of the cold sequence. Unsent emails and reply drafts are
+    cancelled; what was sent stays in the history. Enroll again any time
+    (POST /enrollments/{id}/retry starts a fresh sequence)."""
+    who = user.get("email") or user.get("id") or "someone"
+    results = []
+    for lead_id in request.lead_ids:
+        outcome = await repo.remove_from_sequence(str(lead_id), f"removed from the sequence by {who}")
+        results.append({"lead_id": str(lead_id), "outcome": outcome})
+    return {"removed": sum(r["outcome"] == "removed" for r in results), "results": results}
 
 
 @app.get("/enrollments", dependencies=[Depends(require_user)])

@@ -73,7 +73,12 @@ class OmniRouteClient(LLMClient):
         text = (choices[0].get("message") or {}).get("content", "").strip()
         if not text:
             raise LLMError("omniroute returned an empty completion")
-        return Completion(text=text, model=model, provider=self.name)
+        usage = data.get("usage") or {}
+        return Completion(
+            text=text, model=model, provider=self.name,
+            input_tokens=int(usage.get("prompt_tokens") or 0),
+            output_tokens=int(usage.get("completion_tokens") or 0),
+        )
 
     async def complete_json(
         self, system: str, user: str, *, temperature: float

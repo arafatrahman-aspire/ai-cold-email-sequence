@@ -387,7 +387,8 @@ The number is "Earlier emails the AI reads" in Reply triage → Settings.
 
 **Setup**
 1. Run `supabase/migrations/0006_triage.sql`, then `0007_conversation.sql`
-   and `0008_meeting_sync.sql`, in the Supabase SQL Editor.
+   and `0008_meeting_sync.sql`, in the Supabase SQL Editor. (`0009_lead_browser.sql`
+   adds the lead list on the Enroll page.)
 2. In `.env`, set `CALENDAR_PROVIDER=calcom` with `CALCOM_API_KEY`,
    `CALCOM_EVENT_TYPE_ID` and `CALCOM_BOOKING_URL` (or `fake` to try it
    without Cal.com), then restart the backend.
@@ -416,3 +417,69 @@ contract tests against it.
 **Re-running migrations**: run every file in `supabase/migrations` in number
 order. Running an older file on its own puts back that file's older versions
 of functions that a later file replaced.
+
+## Email Nurture
+
+Keeps in touch with leads who are interested but not ready: six AI-written
+emails over about 30 days, and a hand-off to sales the moment they are ready.
+It is the third tab in the console (**Email Nurture**: Dashboard, Leads,
+Review, Hand-offs, Content, Settings), code in `service/app/nurture/`, tables
+`cold_email.nurture_*` (migrations 0010 and 0011, see supabase/migrations/README.md). Briefs, fallback emails and resources are stored in `cold_email.settings`; the starting text is in `service/app/nurture/content.py`.
+
+**Who joins**: a lead whose score (`public.lead_scores.tier`, else
+`leads.lead_score`) changes to Warm or Cold, checked every 5 minutes with an
+hourly reconciliation (there are no triggers on the shared tables). Not
+joined: unsubscribed, bounced, customers, blocked lead statuses, anyone in the
+cold sequence (one sequence at a time, enforced both ways), anyone already in
+nurture, or who left nurture in the last 90 days.
+
+**Tracks**: persona (CISO, IT Manager, HR & Compliance: keyword rules, then
+the AI; below 70% confidence IT Manager plus a review flag) × Warm/Cold.
+Cold: days 0, 5, 10, 16, 23, 30, educational, no pitch before email 4. Warm:
+days 0, 3, 7, 12, 19, 28, proof and stronger calls to action. A score change
+between Warm and Cold switches track from the next email and recalculates the
+dates.
+
+**Writing**: each email is written about a day ahead from its step brief (36,
+editable), the lead (as cleaned, delimited data: form fields are never
+instructions), approved resources not yet sent, and what the lead clicked.
+The AI never writes links: it uses `{{CTA_DEMO}}`, `{{CTA_PRICING}}` and
+`{{RESOURCE_LINK}}`, which become tracked links. Every draft passes checks
+(word limit, placeholders, no URLs, allowed resource, no prices, discounts,
+guarantees or compliance claims), then an AI judge; one retry, then the
+pre-approved fallback (18, editable) so the email still goes out on time.
+
+**Sending**: from nurture's own account (`NURTURE_*` in `.env`), never a
+cold inbox, in the lead's sending window, with a daily limit, HTML layout,
+one-click `List-Unsubscribe` and a Reply-To that Reply Triage reads. Right
+before every send the lead is checked again (Hot, unsubscribed, customer,
+handed off, in the cold sequence).
+
+**Hand-off** (once, atomically): score becomes Hot, a person clicks pricing or
+demo (mail-scanner clicks within 2 minutes of sending are ignored), a reply
+Reply Triage reads as interested, or "Hand off now". Unsent emails are
+cancelled and sales is emailed an AI summary. Other replies: not now →
+continue; out of office → next email at least 5 days later; objection →
+stop nurture and flag; unsubscribe → suppressed everywhere and the shared
+lead marked DNC; wrong person or unclear → held for a person.
+
+**Safety**: pause-all switch (next cycle), test mode (a day becomes minutes,
+only allow-listed addresses), pilot mode (every AI draft waits in Review), and
+email alerts for failed jobs and a high fallback rate.
+
+**What it changes elsewhere** (all additive): cold enrollment refuses leads in
+active nurture; the poller hands mail about nurture emails to nurture first;
+Reply Triage classifies nurture replies with the same classifier but takes
+nurture's actions (no reply drafts); the nurture mailbox is an inactive inbox
+row the cold sender and poller never use. `OutgoingMessage` gained optional
+`body_html` and `unsubscribe_url`, which cold email does not set.
+
+**Before going live**: links and the unsubscribe page use `NURTURE_PUBLIC_URL`.
+In test mode the console address works; for real leads point an HTTPS
+subdomain at the console and set it, since plain-HTTP links on an IP address
+hurt delivery.
+
+**Tests**: `tests/test_nurture_unit.py`, `tests/test_nurture_writing.py` and
+`tests/integration/test_nurture.py` cover the 14 acceptance scenarios (2, 3 and
+11 as unit tests; the rest end to end in test mode against a real database).
+

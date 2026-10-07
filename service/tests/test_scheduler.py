@@ -26,6 +26,10 @@ async def test_reply_check_runs_at_start_then_every_ten_minutes(monkeypatch):
     monkeypatch.setattr(scheduler.poller, "run_once", poll)
     for name in ("intake", "sender", "triage"):
         monkeypatch.setattr(getattr(scheduler, name), "run_once", idle)
+    for module, fn in ((scheduler.nurture_enroll, "score_tick"), (scheduler.nurture_enroll, "reconcile_tick"),
+                       (scheduler.nurture_jobs, "generate_tick"), (scheduler.nurture_jobs, "send_tick"),
+                       (scheduler.nurture_replies, "poll_tick")):
+        monkeypatch.setattr(module, fn, idle)
 
     scheduler.start()
     try:
@@ -37,7 +41,8 @@ async def test_reply_check_runs_at_start_then_every_ten_minutes(monkeypatch):
         next_run = datetime.fromisoformat(status["poller"]["next_run"])
         wait = (next_run - datetime.now(timezone.utc)).total_seconds()
         assert 590 <= wait <= 600, f"next check should be ~10 min away, got {wait:.0f}s"
-        assert set(status) == {"intake", "sender", "poller", "triage", "calendar"}
+        assert set(status) == {"intake", "sender", "poller", "triage", "calendar", "nurture_score",
+                               "nurture_reconcile", "nurture_write", "nurture_send", "nurture_mailbox"}
     finally:
         scheduler.shutdown()
     assert scheduler.status() == {}

@@ -65,6 +65,10 @@ class OutgoingMessage:
     references: list[str] = field(default_factory=list)
     unsubscribe_mailto: Optional[str] = None
     reply_to: Optional[str] = None
+    # Optional (Email Nurture): an HTML alternative to body_text, and an
+    # HTTPS one-click unsubscribe endpoint (RFC 8058). Cold email sets neither.
+    body_html: Optional[str] = None
+    unsubscribe_url: Optional[str] = None
 
 
 @dataclass

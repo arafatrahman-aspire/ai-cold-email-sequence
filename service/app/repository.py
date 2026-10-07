@@ -61,6 +61,28 @@ async def enroll_lead(
     return row["outcome"], row["lead_id"]
 
 
+LEAD_VIEWS = ("all", "not_enrolled", "available", "in_sequence", "finished")
+
+
+async def browse_leads(
+    search: str | None, view: str, source: str | None, contactable_statuses: list[str],
+    skip_if_in_nurture: bool, limit: int = 50, offset: int = 0,
+) -> tuple[list[dict[str, Any]], int]:
+    """A page of public.leads with their cold-sequence state. Returns (rows, total)."""
+    rows = await db.rows(
+        "browse_leads", p_search=search, p_view=view, p_source=source,
+        p_contactable=contactable_statuses, p_skip_nurture=skip_if_in_nurture,
+        p_limit=limit, p_offset=offset,
+    )
+    total = int(rows[0]["total"]) if rows else 0
+    return [{k: v for k, v in r.items() if k != "total"} for r in rows], total
+
+
+async def remove_from_sequence(lead_id: str, reason: str) -> str:
+    """removed | not_enrolled | busy | not_active"""
+    return str(await db.rpc("remove_from_sequence", p_lead_id=lead_id, p_reason=reason))
+
+
 async def auto_enroll(
     sources: list[str],
     contactable_statuses: list[str],

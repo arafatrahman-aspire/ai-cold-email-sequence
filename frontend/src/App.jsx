@@ -5,6 +5,11 @@ import Enroll from './components/Enroll.jsx'
 import Preview from './components/Preview.jsx'
 import Settings from './components/Settings.jsx'
 import Tools from './components/Tools.jsx'
+import NurtureContent from './components/nurture/NurtureContent.jsx'
+import NurtureDashboard from './components/nurture/NurtureDashboard.jsx'
+import NurtureLeads from './components/nurture/NurtureLeads.jsx'
+import NurtureReview, { NurtureHandoffs } from './components/nurture/NurtureReview.jsx'
+import NurtureSettings from './components/nurture/NurtureSettings.jsx'
 import Accuracy from './components/triage/Accuracy.jsx'
 import Drafts from './components/triage/Drafts.jsx'
 import { FollowUps, Meetings } from './components/triage/Meetings.jsx'
@@ -12,8 +17,9 @@ import TriageReplies from './components/triage/TriageReplies.jsx'
 import TriageSettings from './components/triage/TriageSettings.jsx'
 import { Badge } from './components/ui.jsx'
 
-// Two workspaces in one console: OUT-01 (sending the cold sequence) and
-// OUT-05 (handling the replies). The hash holds both: #enroll, #triage/drafts.
+// Three workspaces in one console: OUT-01 (sending the cold sequence), OUT-05
+// (handling the replies) and Email Nurture. The hash holds both parts:
+// #enroll, #triage/drafts, #nurture/leads.
 const WORKSPACES = {
   sequence: {
     label: 'Cold sequence',
@@ -36,6 +42,17 @@ const WORKSPACES = {
       ['settings', 'Settings'],
     ],
   },
+  nurture: {
+    label: 'Email Nurture',
+    tabs: [
+      ['dashboard', 'Dashboard'],
+      ['leads', 'Leads'],
+      ['review', 'Review'],
+      ['handoffs', 'Hand-offs'],
+      ['content', 'Content'],
+      ['settings', 'Settings'],
+    ],
+  },
 }
 
 const THEME_KEY = 'outreach.theme'
@@ -45,15 +62,15 @@ function readHash() {
   // The old #replies link now lives in the triage workspace.
   if (hash === 'replies') return { workspace: 'triage', tab: 'replies' }
   const [first, second] = hash.split('/')
-  if (first === 'triage') {
-    const tabs = WORKSPACES.triage.tabs
-    return { workspace: 'triage', tab: tabs.some(([t]) => t === second) ? second : tabs[0][0] }
+  if (first === 'triage' || first === 'nurture') {
+    const tabs = WORKSPACES[first].tabs
+    return { workspace: first, tab: tabs.some(([t]) => t === second) ? second : tabs[0][0] }
   }
   const tabs = WORKSPACES.sequence.tabs
   return { workspace: 'sequence', tab: tabs.some(([t]) => t === first) ? first : 'overview' }
 }
 
-const hrefFor = (workspace, tab) => (workspace === 'triage' ? `#triage/${tab}` : `#${tab}`)
+const hrefFor = (workspace, tab) => (workspace === 'sequence' ? `#${tab}` : `#${workspace}/${tab}`)
 
 function readTheme() {
   try {
@@ -297,6 +314,16 @@ function Console({ user, onLogout }) {
             {tab === 'follow-ups' && <FollowUps />}
             {tab === 'accuracy' && <Accuracy />}
             {tab === 'settings' && <TriageSettings />}
+          </>
+        )}
+        {workspace === 'nurture' && (
+          <>
+            {tab === 'dashboard' && <NurtureDashboard />}
+            {tab === 'leads' && <NurtureLeads />}
+            {tab === 'review' && <NurtureReview />}
+            {tab === 'handoffs' && <NurtureHandoffs />}
+            {tab === 'content' && <NurtureContent />}
+            {tab === 'settings' && <NurtureSettings />}
           </>
         )}
       </main>

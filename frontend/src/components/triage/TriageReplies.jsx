@@ -27,7 +27,9 @@ function ReplyCard({ reply, onChanged }) {
         <div className="reply-who">
           <strong>{reply.from_email}</strong>
           <span className="muted">
-            {[reply.job_title, reply.company].filter(Boolean).join(' · ') || 'No job title or company'}
+            {reply.extracted?.source === 'nurture'
+              ? <>Reply to an Email Nurture email · <a href="#nurture/leads">see Email Nurture → Leads</a></>
+              : [reply.job_title, reply.company].filter(Boolean).join(' · ') || 'No job title or company'}
           </span>
         </div>
         <div className="reply-meta">

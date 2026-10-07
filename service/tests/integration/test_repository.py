@@ -133,6 +133,16 @@ create table if not exists public.email_nurture_state (
     lead_id text not null unique references public.leads(lead_id),
     email_journey_started_at timestamptz
 );
+-- Read by Email Nurture (0010).
+alter table public.leads add column if not exists lead_score text default 'Warm';
+alter table public.leads add column if not exists payment_status text default 'none';
+create table if not exists public.lead_scores (
+    id uuid primary key default gen_random_uuid(),
+    lead_id text not null unique references public.leads(lead_id),
+    tier text not null,
+    scored_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
 """
 
 
@@ -152,6 +162,8 @@ async def database():
         "truncate cold_email.meetings, cold_email.reply_drafts, cold_email.inbox_events,"
         " cold_email.emails, cold_email.enrollments, cold_email.contacts,"
         " cold_email.suppression_list, cold_email.inboxes,"
+        " cold_email.nurture_enrollments,"
+        " public.lead_scores,"
         " public.email_nurture_state, public.prospects, public.lead_profiles,"
         " public.company_profiles, public.leads restart identity cascade"
     )
@@ -663,3 +675,68 @@ async def test_meetings_booked_through_the_link(database):
     assert (await repo.triage_context(lead))["has_meeting"] is False
     stats = await repo.triage_stats()
     assert (stats["meeting_leads"], stats["meetings_upcoming"]) == (0, 1)   # uid-3 (a stranger) remains
+
+
+@pytest.mark.anyio
+async def test_lead_browser_enroll_and_remove(database):
+    """The Enroll page: every shared lead with its state, why the blocked ones
+    cannot be enrolled, and removing / re-adding a lead."""
+    from app import repository as repo
+
+    pg = database
+    inbox_id = await _seed(pg)
+    browse = lambda view="all", search=None, limit=50, offset=0: repo.browse_leads(  # noqa: E731
+        search, view, None, CONTACTABLE, True, limit, offset)
+
+    rows, total = await browse()
+    assert total == 7 and len(rows) == 7
+    by_ref = {r["lead_ref"]: r for r in rows}
+    assert by_ref["L-2"]["blocked"] == "not_contactable (DNC)"
+    assert by_ref["L-3"]["blocked"] == "in_email_nurture"
+    assert by_ref["L-4"]["blocked"] == "no_email" and by_ref["L-4"]["email"] is None
+    assert (by_ref["L-1"]["email"], by_ref["L-1"]["job_title"], by_ref["L-1"]["company"]) == (
+        "ciso@example.com", "CISO", "Northwind Holdings")
+    assert (await browse("available"))[1] == 4                     # L-1, 5, 6, 7
+    assert [r["lead_ref"] for r in (await browse(search="northwind"))[0]] == ["L-1"]
+    page, total = await browse(limit=3, offset=6)
+    assert (len(page), total) == (1, 7)
+
+    assert (await repo.enroll_lead("L-1", CONTACTABLE, True))[0] == "enrolled"
+    lead = str(await pg.fetchval("select id from public.leads where lead_id='L-1'"))
+    emails = [{"step_number": i, "subject": f"s{i}", "body": "b"} for i in (1, 2)]
+    now = datetime.now(timezone.utc)
+    await repo.store_sequence(lead, "ciso", "keyword", "g", "m", emails,
+                              [now + timedelta(hours=1), now + timedelta(days=3)])
+    [row], _ = await browse("in_sequence")
+    assert (row["lead_ref"], row["enrollment_status"], row["blocked"], row["emails_sent"]) == (
+        "L-1", "sequence_ready", None, 0)
+    assert row["next_email_at"] is not None
+    assert (await browse("available"))[1] == 3
+
+    # Removing cancels what is unsent, including a reply waiting to auto-send.
+    await repo.record_inbox_event(inbox_id, lead, "reply", "ciso@example.com", "o@x",
+                                  "Re: s1", "<r@x>", None, "hm", now)
+    [ev] = await repo.list_inbox_events(["reply"], 5)
+    draft = await repo.create_draft(ev["id"], lead, inbox_id, "objection_reply", "ciso@example.com",
+                                    "Re: s1", "b", [], None, [], now + timedelta(hours=2))
+    await pg.execute("update cold_email.enrollments set status='sequence_ready' where lead_id=$1::uuid", lead)
+    await pg.execute("update cold_email.emails set status='pending' where lead_id=$1::uuid", lead)
+
+    await pg.execute("update cold_email.enrollments set status='processing' where lead_id=$1::uuid", lead)
+    assert await repo.remove_from_sequence(lead, "x") == "busy"
+    await pg.execute("update cold_email.enrollments set status='sequence_ready' where lead_id=$1::uuid", lead)
+
+    assert await repo.remove_from_sequence(lead, "removed from the sequence by me@x") == "removed"
+    assert await pg.fetchval("select count(*) from cold_email.emails where lead_id=$1::uuid"
+                             " and status='pending'", lead) == 0
+    assert await pg.fetchval("select status from cold_email.reply_drafts where id=$1::uuid", draft) == "cancelled"
+    [row], _ = await browse("finished")
+    assert (row["enrollment_status"], row["enrollment_note"]) == ("stopped", "removed from the sequence by me@x")
+    assert await repo.remove_from_sequence(lead, "again") == "not_active"
+    other = str(await pg.fetchval("select id from public.leads where lead_id='L-5'"))
+    assert await repo.remove_from_sequence(other, "x") == "not_enrolled"
+
+    # Enrolling again starts a fresh sequence.
+    assert await repo.retry_enrollment(lead) is True
+    assert (await repo.lead_for_step(lead))["status"] == "ready_for_outreach"
+    assert (await pg.fetchrow("select status from public.leads where lead_id='L-1'"))["status"] == "New"

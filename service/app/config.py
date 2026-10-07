@@ -117,6 +117,30 @@ class Settings(BaseSettings):
     triage_interval_seconds: int = 60
     calendar_sync_interval_seconds: int = 300  # pick up meetings booked through the link
 
+    # --- Email Nurture ------------------------------------------------------
+    # Nurture sends from its own account, never from the cold inboxes, so
+    # complaints about cold outbound cannot hurt nurture deliverability.
+    # The password is NURTURE_SMTP_PASSWORD (and NURTURE_IMAP_PASSWORD if it
+    # differs). Host/port/TLS default to the SMTP_* / IMAP_* values above.
+    nurture_workers: bool = True
+    nurture_from_email: str = ""
+    nurture_from_name: str = ""
+    nurture_smtp_host: str = ""
+    nurture_smtp_port: int = 0
+    nurture_imap_host: str = ""
+    # Where replies go: an inbox Reply Triage already reads. Default: the
+    # first active cold inbox.
+    nurture_reply_to: str = ""
+    # Public base for tracked links and the unsubscribe page, reachable
+    # without login. Default: APP_PUBLIC_URL + "/api" (the console proxy).
+    # Set it to your HTTPS subdomain once you have one.
+    nurture_public_url: str = ""
+    nurture_enroll_interval_seconds: int = 300
+    nurture_generate_interval_seconds: int = 60
+    nurture_send_interval_seconds: int = 60
+    nurture_poll_interval_seconds: int = 600
+    nurture_reconcile_interval_seconds: int = 3600
+
     # --- Misc ---------------------------------------------------------------
     dry_run: bool = False
     log_level: str = "INFO"

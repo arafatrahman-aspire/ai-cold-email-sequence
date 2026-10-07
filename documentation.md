@@ -312,6 +312,8 @@ All endpoints except `/health` need a session or the `API_KEY` bearer token.
 | GET | `/stats` | Pipeline counts and inbox usage |
 | POST | `/enroll` | Enroll leads `{"leads":[{"lead_id":"L-1042","job_title":"…"}]}` |
 | GET | `/enrollments?status=manual_review,failed` | List enrollments with `last_error` |
+| GET | `/leads?search=&view=all&limit=50&offset=0` | Shared leads with their sequence state; `view`: all, not_enrolled, available, in_sequence, finished |
+| POST | `/enrollments/remove` | Take leads out of the sequence `{"lead_ids":["<uuid>"]}`; unsent emails and drafts are cancelled |
 | POST | `/enrollments/{id}/retry` | Re-draft a `manual_review` / `failed` / `stopped` lead, optionally correcting data |
 | POST | `/preview` | Draft a sequence for a made-up lead; nothing is saved or sent |
 | GET | `/route?job_title=…` | Which persona a title gets |
@@ -322,6 +324,21 @@ All endpoints except `/health` need a session or the `API_KEY` bearer token.
 | GET | `/settings` · PUT `/settings/{key}` | Read / change a runtime setting `{"value": …}` |
 | POST | `/suppress?email=…&reason=…` | Block an address and cancel its sequence |
 | POST | `/run/intake`, `/run/sender`, `/run/poller` | Run a worker immediately |
+| GET | `/nurture/status` | What stops nurture from sending, test mode, pause switch |
+| GET | `/nurture/stats?start=&end=` | Dashboard: KPIs, persona × track, per-email performance, AI health |
+| GET | `/nurture/enrollments?search=&status=live&persona=&temperature=&review=` | Nurture leads |
+| GET | `/nurture/enrollments/{id}` | One lead's timeline: emails (full text), clicks, replies, events |
+| POST | `/nurture/enrollments/{id}/pause` · `resume` · `remove` · `handoff` · `reviewed` · `persona` | Manual actions |
+| GET · POST | `/nurture/eligible` · `/nurture/enroll` | Count / enroll Warm and Cold leads that may join |
+| GET | `/nurture/review` | Drafts waiting for approval and emails due in 3 days |
+| PUT · POST | `/nurture/messages/{id}` · `/nurture/messages/{id}/approve` · `reject` | Edit / decide a draft |
+| GET | `/nurture/handoffs` | Hand-offs to sales with trigger and AI summary |
+| GET · PUT | `/nurture/content/briefs`, `/nurture/content/fallbacks` | The 36 briefs and 18 fallback emails |
+| GET · POST · PUT · DELETE | `/nurture/content/resources[/{id}]`, POST `/nurture/content/resources/auto-tag` | Resource library and AI tag suggestions |
+| GET · PUT | `/nurture/settings` | Nurture settings |
+| POST | `/nurture/run/{score,reconcile,generate,send,poll}` | Run a nurture job now |
+| GET | `/n/c/{email id}/{demo,pricing,resource}` (public) | Tracked link: logs the click, redirects |
+| GET · POST | `/n/u/{enrollment id}` (public) | Unsubscribe page / one-click unsubscribe (RFC 8058) |
 | — | `/auth/start`, `/callback`, `/me`, `/activity`, `/logout` | CMS login flow |
 
 ---

@@ -1,4 +1,5 @@
-"""APScheduler wiring for the workers (intake, sender, poller, triage, calendar).
+"""APScheduler wiring for the workers (intake, sender, poller, triage, calendar,
+and Email Nurture's own jobs).
 
 This is the cron layer. It lives here rather than in Supabase Edge Functions
 because the send and poll paths need SMTP and IMAP, which Deno cannot provide.
@@ -16,6 +17,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import get_settings
+from app.nurture import alerts as nurture_alerts
+from app.nurture import enroll as nurture_enroll
+from app.nurture import jobs as nurture_jobs
+from app.nurture import options as nurture_options
+from app.nurture import replies as nurture_replies
 from app.workers import calendar_sync, intake, poller, sender, triage
 
 log = logging.getLogger(__name__)
@@ -33,6 +39,42 @@ def _guard(name: str, coro_fn):
 
     _run.__name__ = f"{name}_tick"
     return _run
+
+
+def _guard_nurture(name: str, coro_fn):
+    """Like _guard, and a failure also emails the nurture alert address."""
+    async def _run() -> None:
+        try:
+            await coro_fn()
+        except Exception as exc:
+            log.exception("%s worker tick failed", name)
+            try:
+                await nurture_alerts.job_failed(await nurture_options.load(), name, exc)
+            except Exception:
+                log.exception("could not send the %s failure alert", name)
+
+    _run.__name__ = f"{name}_tick"
+    return _run
+
+
+def _add_nurture_jobs(s) -> None:
+    now = datetime.now(timezone.utc)
+    for job_id, fn, seconds, first in (
+        ("nurture_score", nurture_enroll.score_tick, s.nurture_enroll_interval_seconds, now),
+        ("nurture_reconcile", nurture_enroll.reconcile_tick, s.nurture_reconcile_interval_seconds, None),
+        ("nurture_write", nurture_jobs.generate_tick, s.nurture_generate_interval_seconds, None),
+        ("nurture_send", nurture_jobs.send_tick, s.nurture_send_interval_seconds, None),
+        ("nurture_mailbox", nurture_replies.poll_tick, s.nurture_poll_interval_seconds, None),
+    ):
+        _scheduler.add_job(
+            _guard_nurture(job_id, fn),
+            trigger=IntervalTrigger(seconds=seconds),
+            id=job_id,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=60,
+            **({"next_run_time": first} if first else {}),
+        )
 
 
 def start() -> AsyncIOScheduler:
@@ -89,6 +131,9 @@ def start() -> AsyncIOScheduler:
         misfire_grace_time=60,
         next_run_time=datetime.now(timezone.utc),
     )
+
+    if s.nurture_workers:
+        _add_nurture_jobs(s)
 
     _scheduler.start()
     log.info(

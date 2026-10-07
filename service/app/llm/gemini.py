@@ -70,7 +70,12 @@ class GeminiClient(LLMClient):
         if not text:
             raise LLMError("gemini returned an empty completion")
 
-        return Completion(text=text, model=self._model, provider=self.name)
+        usage = data.get("usageMetadata") or {}
+        return Completion(
+            text=text, model=self._model, provider=self.name,
+            input_tokens=int(usage.get("promptTokenCount") or 0),
+            output_tokens=int(usage.get("candidatesTokenCount") or 0),
+        )
 
     async def aclose(self) -> None:
         await self._client.aclose()
