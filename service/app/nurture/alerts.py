@@ -35,7 +35,7 @@ async def recipient(cfg: dict[str, Any], key: str) -> str:
 
 
 async def _from() -> tuple[Optional[Inbox], Any]:
-    box = sending.mailbox()
+    box = await sending.sending_inbox()
     if box is not None:
         return box, sending.transport()
     inboxes = await repo.active_inboxes()

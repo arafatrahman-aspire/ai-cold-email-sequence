@@ -62,3 +62,35 @@ def test_remove_reports_each_lead_and_who_did_it(client):
     assert calls["remove"][0][1] == "removed from the sequence by me@aspire.com"
     assert c.post("/enrollments/remove", json={"lead_ids": ["not-a-uuid"]}).status_code == 422
     assert c.post("/enrollments/remove", json={"lead_ids": []}).status_code == 422
+
+
+def test_nurture_leads_page_and_select_all(client, monkeypatch):
+    """Email Nurture -> Leads: every lead with each view's size, and the ids for "select all"."""
+    from app.nurture import options
+    from app.nurture import repo as nrepo
+
+    c, _ = client
+    sizes = {"all": 183, "can_join": 120, "in_nurture": 3, "finished": 1}
+    seen = []
+
+    async def browse(search, view, cooldown, blocked, skip, limit, offset):
+        seen.append((search, view, limit, offset))
+        return [{"lead_id": f"{view}-{i}"} for i in range(min(limit, sizes[view]))], sizes[view]
+
+    async def candidates(cooldown, blocked, skip, limit):
+        return [{"lead_id": "a", "tier": "Warm"}, {"lead_id": "b", "tier": "Cold"}]
+
+    async def load(fresh=False):
+        return options.merge({})
+
+    monkeypatch.setattr(nrepo, "browse", browse)
+    monkeypatch.setattr(nrepo, "candidates", candidates)
+    monkeypatch.setattr(options, "load", load)
+
+    r = c.get("/nurture/leads", params={"view": "can_join", "search": " acme ", "limit": 2})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 120 and len(body["leads"]) == 2 and body["counts"] == sizes
+    assert seen[0] == ("acme", "can_join", 2, 0)
+    assert c.get("/nurture/leads", params={"view": "everyone"}).status_code == 422
+    assert c.get("/nurture/eligible").json() == {"count": 2, "by_tier": {"Warm": 1, "Cold": 1}, "lead_ids": ["a", "b"]}

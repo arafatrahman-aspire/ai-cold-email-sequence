@@ -188,7 +188,7 @@ async def send_tick(now: Optional[datetime] = None) -> dict[str, Any]:
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     ctx: dict[str, Any] = {
         "sent": await nrepo.sent_since(day_start),
-        "box": sending.mailbox(),
+        "box": await sending.sending_inbox(),
         "reply_to": await sending.reply_to(),
         "public": sending.public_url(),
         "allow": options.allow_list(cfg),

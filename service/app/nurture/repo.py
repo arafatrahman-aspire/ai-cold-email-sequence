@@ -174,6 +174,19 @@ async def list_enrollments(search: Optional[str], status: Optional[str], persona
     return [{k: v for k, v in r.items() if k != "total"} for r in rows], total
 
 
+LEAD_VIEWS = ("all", "can_join", "in_nurture", "finished")
+
+
+async def browse(search: Optional[str], view: str, cooldown_days: int, blocked: list[str], skip_external: bool,
+                 limit: int, offset: int) -> tuple[list[dict[str, Any]], int]:
+    """Every shared lead with its nurture state (0012_nurture_lead_list.sql)."""
+    rows = await db.rows("nurture_browse", p_search=search, p_view=view, p_cooldown_days=cooldown_days,
+                         p_blocked_statuses=blocked, p_skip_external=skip_external, p_limit=limit,
+                         p_offset=offset)
+    total = int(rows[0]["total"]) if rows else 0
+    return [{k: v for k, v in r.items() if k != "total"} for r in rows], total
+
+
 async def detail(enrollment_id: str) -> Optional[dict[str, Any]]:
     return await db.rpc("nurture_detail", p_id=enrollment_id)
 

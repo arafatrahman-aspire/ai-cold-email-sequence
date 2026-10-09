@@ -140,3 +140,35 @@ def test_settings_merge_keeps_nested_defaults():
     assert cfg["branding"]["pricing_url"] == "https://x/p" and cfg["branding"]["company_name"]
     assert "unknown" not in cfg
     assert options.test_minutes(cfg) == 1.0 and options.test_minutes(options.merge({})) is None
+
+
+# --- which account nurture sends from ---------------------------------------------
+
+@pytest.mark.anyio
+async def test_sending_account_falls_back_to_the_cold_inbox(monkeypatch):
+    from app.config import get_settings
+    from app.mail.base import Inbox
+    from app.nurture import sending
+
+    cold = Inbox("id-a", "outreach@aspiretss.com", "Alex", "smtp", "INBOX_A", 15, 0)
+
+    async def active_inboxes():
+        return [cold]
+
+    monkeypatch.setattr(sending.repo, "active_inboxes", active_inboxes)
+    s = get_settings()
+
+    # Nothing set: the cold inbox, with its own credentials.
+    monkeypatch.setattr(s, "nurture_from_email", "")
+    assert await sending.sending_inbox() is cold
+    assert any("cold inbox outreach@aspiretss.com" in w for w in await sending.warnings())
+
+    # Set to the cold inbox's address: still that inbox (no NURTURE_SMTP_PASSWORD needed).
+    monkeypatch.setattr(s, "nurture_from_email", "Outreach@AspireTSS.com")
+    assert await sending.sending_inbox() is cold
+
+    # A separate account: nurture's own credentials.
+    monkeypatch.setattr(s, "nurture_from_email", "news@aspiretss.com")
+    own = await sending.sending_inbox()
+    assert (own.email, own.credential_ref) == ("news@aspiretss.com", "NURTURE")
+    assert not any("cold inbox" in w for w in await sending.warnings())

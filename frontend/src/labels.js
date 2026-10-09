@@ -163,5 +163,11 @@ export const NURTURE_OUTCOMES = {
   in_email_nurture: 'In another email journey',
   test_mode_not_allowed: 'Not on the test allow-list',
 }
-export const nurtureOutcome = (o) =>
-  NURTURE_OUTCOMES[o] || (o?.startsWith('lead_status') ? `Lead status ${o.replace('lead_status ', '')}` : o)
+export function nurtureOutcome(o) {
+  if (NURTURE_OUTCOMES[o]) return NURTURE_OUTCOMES[o]
+  if (o?.startsWith('lead_status')) return `Lead status ${o.replace('lead_status ', '')}`
+  // not_warm_or_cold (Hot) / (no score): only Warm and Cold leads are nurtured
+  const tier = o?.match(/^not_warm_or_cold \((.*)\)$/)?.[1]
+  if (tier) return tier === 'Hot' ? 'Hot: for sales, not nurture' : `Score: ${tier} (only Warm and Cold join)`
+  return o
+}

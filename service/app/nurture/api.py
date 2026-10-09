@@ -11,6 +11,7 @@ Console (CMS login, like every other console endpoint): /nurture/*.
 
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import logging
@@ -205,12 +206,12 @@ def console_router(require_user: Callable) -> APIRouter:
     @router.get("/status")
     async def status() -> dict:
         cfg = await options.load()
-        box = sending.mailbox()
+        box = await sending.sending_inbox()
         return {
             "paused": cfg["paused"],
             "test_mode": cfg["test_mode"],
             "problems": await sending.problems(cfg),
-            "warnings": sending.warnings(),
+            "warnings": await sending.warnings(),
             "from_email": box.email if box else None,
             "reply_to": await sending.reply_to(),
             "public_url": sending.public_url(),
@@ -306,15 +307,33 @@ def console_router(require_user: Callable) -> APIRouter:
     async def reviewed(enrollment_id: UUID, user: dict = Depends(require_user)) -> dict:
         return await _expect(await nrepo.update(str(enrollment_id), needs_review=False), "clear the flag")
 
+    @router.get("/leads")
+    async def leads(search: Optional[str] = None, view: str = "all", limit: int = 100, offset: int = 0) -> dict:
+        """Every shared lead with its nurture state, and each view's size."""
+        if view not in nrepo.LEAD_VIEWS:
+            raise HTTPException(status_code=422, detail=f"view must be one of: {', '.join(nrepo.LEAD_VIEWS)}")
+        cfg = await options.load()
+        args = ((search or "").strip()[:100] or None, int(cfg["cooldown_days"]),
+                list(cfg["blocked_lead_statuses"]), bool(cfg["skip_if_in_email_nurture"]))
+
+        async def page(v: str, n: int, skip: int):
+            return await nrepo.browse(args[0], v, *args[1:], n, skip)
+
+        (rows, total), *others = await asyncio.gather(
+            page(view, max(1, min(limit, 200)), max(0, offset)), *(page(v, 1, 0) for v in nrepo.LEAD_VIEWS))
+        return {"leads": rows, "total": total,
+                "counts": {v: t for v, (_, t) in zip(nrepo.LEAD_VIEWS, others)}}
+
     @router.get("/eligible")
     async def eligible() -> dict:
+        """Warm and Cold leads that may join now (their ids, for "select all")."""
         cfg = await options.load()
         rows = await nrepo.candidates(int(cfg["cooldown_days"]), list(cfg["blocked_lead_statuses"]),
-                                          bool(cfg["skip_if_in_email_nurture"]), 2000)
+                                      bool(cfg["skip_if_in_email_nurture"]), 2000)
         tiers: dict[str, int] = {}
         for r in rows:
             tiers[r["tier"]] = tiers.get(r["tier"], 0) + 1
-        return {"count": len(rows), "by_tier": tiers}
+        return {"count": len(rows), "by_tier": tiers, "lead_ids": [str(r["lead_id"]) for r in rows]}
 
     @router.post("/enroll")
     async def enroll_now(body: EnrollRequest) -> dict:

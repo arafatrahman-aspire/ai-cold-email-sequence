@@ -1,10 +1,12 @@
-"""Nurture's own sending identity.
+"""Nurture's sending identity.
 
-Nurture sends through the same SMTP code as the cold sequence, but from its
-own account (NURTURE_FROM_EMAIL, password NURTURE_SMTP_PASSWORD), never from
-a cold inbox. Replies are sent to an inbox Reply Triage already reads
-(NURTURE_REPLY_TO, default: the first active cold inbox), and links point at
-NURTURE_PUBLIC_URL.
+Nurture sends through the same SMTP code as the cold sequence. With
+NURTURE_FROM_EMAIL empty (the current setup) it sends from the first active
+cold inbox, with that inbox's own credentials. Setting NURTURE_FROM_EMAIL
+(password NURTURE_SMTP_PASSWORD) moves it to a separate account later, so
+complaints about cold outbound cannot hurt nurture deliverability.
+Replies go to an inbox Reply Triage already reads (NURTURE_REPLY_TO, default:
+the first active cold inbox), and links point at NURTURE_PUBLIC_URL.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ _transport: Optional[MailSender] = None
 
 
 def mailbox() -> Optional[Inbox]:
-    """The nurture sending account, or None when NURTURE_FROM_EMAIL is unset."""
+    """Nurture's own account (NURTURE_FROM_EMAIL), or None when it is unset."""
     s = get_settings()
     email = s.nurture_from_email.strip().lower()
     if not email:
@@ -35,6 +37,17 @@ def mailbox() -> Optional[Inbox]:
         config["imap_host"] = s.nurture_imap_host
     return Inbox(id="nurture", email=email, display_name=s.nurture_from_name or None, provider="smtp",
                  credential_ref="NURTURE", daily_cap=None, poll_cursor=0, config=config)
+
+
+async def sending_inbox() -> Optional[Inbox]:
+    """The account nurture sends from: its own one when NURTURE_FROM_EMAIL is
+    set (a cold inbox's address means that inbox, with its credentials),
+    otherwise the first active cold inbox."""
+    own = mailbox()
+    cold = await repo.active_inboxes()
+    if own is not None:
+        return next((i for i in cold if i.email.lower() == own.email), own)
+    return cold[0] if cold else None
 
 
 def transport() -> MailSender:
@@ -64,15 +77,11 @@ async def reply_to() -> Optional[str]:
 async def problems(cfg: dict[str, Any]) -> list[str]:
     """What stops nurture from sending. Empty when it can send."""
     out: list[str] = []
-    box = mailbox()
+    box = await sending_inbox()
     if box is None:
-        out.append("NURTURE_FROM_EMAIL is not set in .env (nurture's own sending account)")
-    elif not os.environ.get("NURTURE_SMTP_PASSWORD"):
+        out.append("No account to send from: add an active cold inbox, or set NURTURE_FROM_EMAIL in .env")
+    elif box.id == "nurture" and not os.environ.get("NURTURE_SMTP_PASSWORD"):
         out.append("NURTURE_SMTP_PASSWORD is not set in .env")
-    else:
-        cold = {i.email.lower() for i in await repo.active_inboxes()}
-        if box.email in cold:
-            out.append("NURTURE_FROM_EMAIL is a cold-sequence inbox; nurture needs its own account")
     if not public_url():
         out.append("NURTURE_PUBLIC_URL (or APP_PUBLIC_URL) is not set: links and unsubscribe need it")
     branding = cfg["branding"]
@@ -85,9 +94,13 @@ async def problems(cfg: dict[str, Any]) -> list[str]:
     return out
 
 
-def warnings() -> list[str]:
+async def warnings() -> list[str]:
     """Allowed, but worth knowing."""
     out = []
+    box = await sending_inbox()
+    if box is not None and box.id != "nurture":
+        out.append(f"Nurture sends from the cold inbox {box.email}: both share its reputation and "
+                   "Gmail's daily sending limit. Set NURTURE_FROM_EMAIL to separate them later")
     url = public_url()
     if url and not url.startswith("https://"):
         out.append("Links use plain HTTP; move NURTURE_PUBLIC_URL to an HTTPS subdomain before going live")

@@ -6,15 +6,6 @@ import {
 } from '../../labels.js'
 import { Badge, Card, ErrorNote, Spinner, useAction } from '../ui.jsx'
 
-const PAGE = 50
-const STATUSES = [
-  ['live', 'In nurture'],
-  ['handed_off', 'Handed off'],
-  ['completed', 'Completed'],
-  ['exited', 'Exited'],
-  ['', 'All'],
-]
-
 const name = (e) => [e.first_name, e.last_name].filter(Boolean).join(' ') || e.email
 const live = (s) => ['active', 'paused', 'held'].includes(s)
 
@@ -187,143 +178,204 @@ function Detail({ id, onChanged, onClose }) {
 // List
 // ---------------------------------------------------------------------------
 
-function EnrollEligible({ onDone }) {
-  const [{ result: eligible }, count] = useAction(() => api.nurtureEligible())
-  const [{ busy, error, result }, enroll] = useAction(async () => {
-    if (!window.confirm(`Enroll all ${eligible.count} eligible Warm and Cold leads? Each starts receiving nurture emails.`)) return null
-    const r = await api.nurtureEnroll({ all_eligible: true })
-    onDone()
-    count()
-    return r
-  })
-  useEffect(() => {
-    count()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  if (!eligible) return null
-  const reasons = {}
-  for (const r of result?.results || []) if (r.outcome !== 'enrolled') reasons[r.outcome] = (reasons[r.outcome] || 0) + 1
-  return (
-    <div className="enroll-eligible">
-      <button className="btn" disabled={busy || !eligible.count} onClick={() => enroll()}
-        title="Leads already Warm or Cold when nurture started are not enrolled automatically.">
-        {busy ? <Spinner /> : null} Enroll eligible leads ({formatNumber(eligible.count)})
-      </button>
-      {result && (
-        <span className="muted">
-          Enrolled {formatNumber(result.enrolled)}.
-          {Object.entries(reasons).map(([k, n]) => ` ${nurtureOutcome(k)}: ${n}.`)}
-        </span>
-      )}
-      <ErrorNote error={error} />
-    </div>
-  )
+const VIEWS = [
+  ['all', 'All leads'],
+  ['can_join', 'Can join'],
+  ['in_nurture', 'In nurture'],
+  ['finished', 'Finished'],
+]
+const PAGE_SIZE = 100
+
+// A lead that may be enrolled now, or one in nurture that may be removed.
+const canEnroll = (l) => !l.why_not && !live(l.status)
+const canRemove = (l) => live(l.status)
+
+function NurtureState({ lead }) {
+  if (lead.status) {
+    return (
+      <>
+        <StatusBadge status={lead.status} />
+        <div className="muted">
+          {NURTURE_PERSONAS[lead.persona]} · {TEMPERATURES[lead.temperature]} · {lead.step} of 6 sent
+        </div>
+        {live(lead.status) && lead.next_send_at && <div className="muted">next {shortDateTime(lead.next_send_at)}</div>}
+        {!live(lead.status) && lead.exit_reason && <div className="muted">{EXIT_REASONS[lead.exit_reason] || lead.exit_reason}</div>}
+        {lead.needs_review && <div><Badge tone="warning">Review</Badge></div>}
+      </>
+    )
+  }
+  if (lead.why_not) return <span className="muted">{nurtureOutcome(lead.why_not)}</span>
+  return <span className="muted">Not in nurture</span>
 }
 
 export default function NurtureLeads() {
   const [search, setSearch] = useState('')
-  const [filters, setFilters] = useState({ search: '', status: 'live', persona: '', temperature: '', review: '' })
+  const [query, setQuery] = useState('')
+  const [view, setView] = useState('all')
   const [offset, setOffset] = useState(0)
   const [data, setData] = useState(null)
-  const [selected, setSelected] = useState(null)
-  const [{ busy, error }, load] = useAction(async () => {
-    setData(await api.nurtureEnrollments({ ...filters, limit: PAGE, offset }))
+  const [selected, setSelected] = useState(() => new Map()) // lead_id -> lead (or {lead_id} from "select all")
+  const [open, setOpen] = useState(null)
+  const [notice, setNotice] = useState(null)
+
+  const [{ busy: loading, error }, load] = useAction(async () => {
+    setData(await api.nurtureLeads({ search: query, view, limit: PAGE_SIZE, offset }))
   })
   useEffect(() => {
-    const t = setTimeout(() => {
-      setFilters((f) => ({ ...f, search: search.trim() }))
-      setOffset(0)
-    }, 300)
+    const t = setTimeout(() => { setQuery(search.trim()); setOffset(0) }, 300)
     return () => clearTimeout(t)
   }, [search])
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, offset])
-  const setFilter = (patch) => {
-    setFilters((f) => ({ ...f, ...patch }))
-    setOffset(0)
-  }
+  }, [query, view, offset])
 
-  const rows = data?.enrollments || []
+  const [{ busy: acting, error: actError }, act] = useAction(async (action, leads) => {
+    if (action === 'enroll') {
+      if (!window.confirm(`Enroll ${leads.length} lead${leads.length === 1 ? '' : 's'} in Email Nurture? Each starts receiving the 6 emails.`)) return
+      const r = await api.nurtureEnroll({ lead_ids: leads.map((l) => l.lead_id) })
+      const reasons = {}
+      for (const x of r.results) if (x.outcome !== 'enrolled') reasons[x.outcome] = (reasons[x.outcome] || 0) + 1
+      setNotice({ tone: Object.keys(reasons).length ? 'warning' : 'good',
+        text: `Enrolled ${r.enrolled} of ${leads.length}.` + Object.entries(reasons).map(([k, n]) => ` ${nurtureOutcome(k)}: ${n}.`).join('') })
+    } else {
+      if (!window.confirm(`Remove ${leads.length} lead${leads.length === 1 ? '' : 's'} from nurture? Unsent emails are cancelled.`)) return
+      let done = 0
+      for (const l of leads) {
+        try { await api.nurtureAction(l.enrollment_id, 'remove'); done += 1 } catch { /* shown in the count */ }
+      }
+      setNotice({ tone: done === leads.length ? 'good' : 'warning', text: `Removed ${done} of ${leads.length}.` })
+    }
+    setSelected(new Map())
+    await load()
+  })
+
+  // Every lead that can join, across all pages.
+  const [{ busy: selectingAll }, selectAllEligible] = useAction(async () => {
+    const r = await api.nurtureEligible()
+    setSelected(new Map(r.lead_ids.map((id) => [id, { lead_id: id }])))
+  })
+
+  const rows = data?.leads || []
   const total = data?.total || 0
+  const pickable = rows.filter((l) => canEnroll(l) || canRemove(l))
+  const allOnPage = pickable.length > 0 && pickable.every((l) => selected.has(l.lead_id))
+  const picked = [...selected.values()]
+  const toEnroll = picked.filter(canEnroll)
+  const toRemove = picked.filter((l) => canRemove(l))
+  const busy = loading || acting
+
+  const toggle = (l) => setSelected((m) => {
+    const next = new Map(m)
+    next.has(l.lead_id) ? next.delete(l.lead_id) : next.set(l.lead_id, l)
+    return next
+  })
+  const togglePage = () => setSelected((m) => {
+    const next = new Map(m)
+    pickable.forEach((l) => (allOnPage ? next.delete(l.lead_id) : next.set(l.lead_id, l)))
+    return next
+  })
+
   return (
     <div className="stack">
       <div className="toolbar">
         <div>
           <h1>Nurture leads</h1>
-          <p className="muted">Leads join when their score becomes Warm or Cold. Select one to see every email, click and reply.</p>
+          <p className="muted">
+            Every lead in your shared leads table. Tick the ones to enroll (Warm and Cold leads that may join), or the
+            ones in nurture to remove. Score changes still enroll leads automatically.
+          </p>
         </div>
-        <EnrollEligible onDone={load} />
       </div>
 
       <div className="lead-filters">
         <input type="search" className="lead-search" value={search} onChange={(e) => setSearch(e.target.value)}
           placeholder="Search name, email, company or job title" aria-label="Search" />
-        <div className="filter-row">
-          <div className="chips" role="tablist" aria-label="Status">
-            {STATUSES.map(([key, label]) => (
-              <button key={key} role="tab" aria-selected={filters.status === key}
-                className={`chip ${filters.status === key ? 'is-active' : ''}`} onClick={() => setFilter({ status: key })}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <select aria-label="Persona" value={filters.persona} onChange={(e) => setFilter({ persona: e.target.value })}>
-            <option value="">All personas</option>
-            {Object.entries(NURTURE_PERSONAS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-          </select>
-          <select aria-label="Track" value={filters.temperature} onChange={(e) => setFilter({ temperature: e.target.value })}>
-            <option value="">Warm and Cold</option>
-            {Object.entries(TEMPERATURES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-          </select>
-          <label className="check-pill-inline">
-            <input type="checkbox" checked={filters.review === 'true'}
-              onChange={(e) => setFilter({ review: e.target.checked ? 'true' : '' })} />
-            Needs review
-          </label>
+        <div className="chips" role="tablist" aria-label="Which leads">
+          {VIEWS.map(([key, label]) => (
+            <button key={key} role="tab" aria-selected={view === key}
+              className={`chip ${view === key ? 'is-active' : ''}`}
+              onClick={() => { setView(key); setOffset(0) }}>
+              {label}{data?.counts && <span className="chip-count">{formatNumber(data.counts[key])}</span>}
+            </button>
+          ))}
         </div>
       </div>
-      <ErrorNote error={error} onRetry={load} />
 
-      {selected && <Detail id={selected} onChanged={load} onClose={() => setSelected(null)} />}
+      {notice && (
+        <div className={`note note-${notice.tone}`} role="status">
+          <Badge tone={notice.tone}>{notice.tone === 'good' ? 'Done' : 'Partly done'}</Badge>
+          <span>{notice.text}</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => setNotice(null)}>Dismiss</button>
+        </div>
+      )}
+      <ErrorNote error={error} onRetry={load} />
+      <ErrorNote error={actError} />
+
+      {open && <Detail id={open} onChanged={load} onClose={() => setOpen(null)} />}
+
+      <div className="save-bar" role="region" aria-label="Selection">
+        <span>{picked.length ? `${formatNumber(picked.length)} selected` : 'Tick leads to enroll or remove them'}</span>
+        <div className="save-actions">
+          <button className="btn btn-ghost btn-sm" disabled={selectingAll || busy} onClick={() => selectAllEligible()}
+            title="Selects every Warm and Cold lead that may join, on every page">
+            {selectingAll ? <Spinner /> : null} Select all that can join{data?.counts ? ` (${formatNumber(data.counts.can_join)})` : ''}
+          </button>
+          {picked.length > 0 && <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Map())}>Clear</button>}
+          {toEnroll.length > 0 && (
+            <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => act('enroll', toEnroll)}>
+              Enroll {formatNumber(toEnroll.length)}
+            </button>
+          )}
+          {toRemove.length > 0 && (
+            <button className="btn btn-sm btn-remove" disabled={busy} onClick={() => act('remove', toRemove)}>
+              Remove {formatNumber(toRemove.length)}
+            </button>
+          )}
+        </div>
+      </div>
 
       <Card>
-        {!data && busy ? <Spinner label="Loading…" /> : rows.length ? (
+        {!data && loading ? <Spinner label="Loading leads…" /> : rows.length ? (
           <div className="table-wrap">
             <table className="lead-table">
               <thead>
-                <tr><th>Lead</th><th>Persona · track</th><th>Step</th><th>Status</th><th>Next email</th><th aria-label="Open" /></tr>
+                <tr>
+                  <th className="col-check">
+                    <input type="checkbox" checked={allOnPage} disabled={!pickable.length} onChange={togglePage}
+                      aria-label="Select every lead on this page" />
+                  </th>
+                  <th>Lead</th><th>Role</th><th>Score</th><th>Nurture</th><th aria-label="Action" />
+                </tr>
               </thead>
               <tbody>
-                {rows.map((e) => (
-                  <tr key={e.id} className={selected === e.id ? 'is-selected' : undefined}>
-                    <td>
-                      <strong>{name(e)}</strong>
-                      <div className="muted">{[e.job_title, e.company].filter(Boolean).join(' · ') || e.email}</div>
+                {rows.map((l) => (
+                  <tr key={l.lead_id} className={selected.has(l.lead_id) ? 'is-selected' : undefined}>
+                    <td className="col-check">
+                      {(canEnroll(l) || canRemove(l)) && (
+                        <input type="checkbox" checked={selected.has(l.lead_id)} onChange={() => toggle(l)}
+                          aria-label={`Select ${name(l)}`} />
+                      )}
                     </td>
-                    <td>
-                      {NURTURE_PERSONAS[e.persona]} · {TEMPERATURES[e.temperature]}
-                      {e.needs_review && <div><Badge tone="warning">Review</Badge></div>}
+                    <td><strong>{[l.first_name, l.last_name].filter(Boolean).join(' ') || '—'}</strong><div className="muted">{l.email || 'No email'}</div></td>
+                    <td>{l.job_title || <span className="muted">No job title</span>}<div className="muted">{l.company || 'No company'}</div></td>
+                    <td>{l.tier || <span className="muted">—</span>}<div className="muted">{l.lead_status}</div></td>
+                    <td><NurtureState lead={l} /></td>
+                    <td className="col-action">
+                      {l.enrollment_id && <button className="btn btn-sm" onClick={() => setOpen(l.enrollment_id)}>Open</button>}
+                      {canEnroll(l) && <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => act('enroll', [l])}>Enroll</button>}
                     </td>
-                    <td>{e.step} of 6</td>
-                    <td>
-                      <StatusBadge status={e.status} />
-                      {e.exit_reason && <div className="muted">{EXIT_REASONS[e.exit_reason] || e.exit_reason}</div>}
-                    </td>
-                    <td>{e.next_send_at && live(e.status) ? <>{shortDateTime(e.next_send_at)}<div className="muted">{relativeTime(e.next_send_at)}</div></> : <span className="muted">—</span>}</td>
-                    <td className="col-action"><button className="btn btn-sm" onClick={() => setSelected(e.id)}>Open</button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        ) : data ? <p className="muted">No leads here.</p> : null}
-        {total > PAGE && (
+        ) : data ? <p className="muted">{query ? `No leads match "${query}".` : 'No leads in this view.'}</p> : null}
+        {total > PAGE_SIZE && (
           <div className="pager">
-            <span className="muted">{formatNumber(offset + 1)}–{formatNumber(Math.min(offset + PAGE, total))} of {formatNumber(total)}</span>
-            <button className="btn btn-sm" disabled={busy || offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
-            <button className="btn btn-sm" disabled={busy || offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</button>
+            <span className="muted">{formatNumber(offset + 1)}–{formatNumber(Math.min(offset + PAGE_SIZE, total))} of {formatNumber(total)}</span>
+            <button className="btn btn-sm" disabled={busy || offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>Previous</button>
+            <button className="btn btn-sm" disabled={busy || offset + PAGE_SIZE >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>Next</button>
           </div>
         )}
       </Card>

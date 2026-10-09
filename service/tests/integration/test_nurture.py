@@ -513,3 +513,51 @@ async def test_the_nurture_mailbox_is_invisible_to_the_cold_sequence(world):
     # Registering again is harmless, and the cold inbox itself is never taken over.
     assert (await nrepo.register_mailbox("nurture@aspire.test", "Aspire"))["id"] == row["id"]
     assert (await nrepo.register_mailbox(world["inbox"].email, "x"))["active"] is True
+
+
+@pytest.mark.anyio
+async def test_sends_from_the_cold_inbox_when_nurture_has_no_account(world, monkeypatch):
+    """NURTURE_FROM_EMAIL empty (the current setup): nurture uses the cold inbox."""
+    from app.config import get_settings
+    from app.nurture import sending
+
+    pg, mail, start = world["pg"], world["mail"], world["start"]
+    monkeypatch.setattr(get_settings(), "nurture_from_email", "")
+    monkeypatch.delenv("NURTURE_SMTP_PASSWORD")
+    from app.nurture import options
+    assert await sending.problems(await options.load()) == []
+    assert any("cold inbox" in w for w in await sending.warnings())
+
+    lead, eid = await enrolled(pg, "W-11", "ciso@w.test", "CISO", "Warm", start)
+    await run(0, 0, start)
+    [(inbox, msg)] = [(i, m) for i, m in mail.sent if m.to_email == "ciso@w.test"]
+    assert inbox.email == world["inbox"].email and inbox.credential_ref == "INBOX_A"
+
+
+@pytest.mark.anyio
+async def test_leads_tab_lists_every_lead_with_its_nurture_state(database):
+    """0012: all leads, why each can or cannot join, and the four views."""
+    from app import repository as repo
+    from app.nurture import enroll
+    from app.nurture import repo as nrepo
+
+    pg = database
+    cfg = await configure()
+    args = (90, cfg["blocked_lead_statuses"], True)
+    warm = await add_lead(pg, "B-1", "warm@b.test", "IT Manager", "Warm")
+    await add_lead(pg, "B-2", "hot@b.test", "IT Manager", "Hot")
+    await add_lead(pg, "B-3", "cold@b.test", "HR Manager", "Cold")
+    await add_lead(pg, "B-4", "outbound@b.test", "CISO", "Warm")
+    assert (await repo.enroll_lead("B-4", CONTACTABLE, True))[0] == "enrolled"
+    assert await enroll.enroll_lead(warm, "Warm", "manual", cfg, MON) == "enrolled"
+
+    rows, total = await nrepo.browse(None, "all", *args, 50, 0)
+    by_email = {r["email"]: r for r in rows}
+    assert total == 4
+    assert (by_email["warm@b.test"]["status"], by_email["warm@b.test"]["why_not"]) == ("active", None)
+    assert by_email["hot@b.test"]["why_not"] == "not_warm_or_cold (Hot)"
+    assert by_email["cold@b.test"]["why_not"] is None and by_email["cold@b.test"]["status"] is None
+    assert by_email["outbound@b.test"]["why_not"] == "in_cold_sequence"
+    assert [r["email"] for r in (await nrepo.browse(None, "can_join", *args, 50, 0))[0]] == ["cold@b.test"]
+    assert [r["email"] for r in (await nrepo.browse(None, "in_nurture", *args, 50, 0))[0]] == ["warm@b.test"]
+    assert (await nrepo.browse("hr manager", "all", *args, 50, 0))[1] == 1

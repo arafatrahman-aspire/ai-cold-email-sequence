@@ -124,6 +124,7 @@ export const api = {
   nurtureStatus: () => request('GET', '/nurture/status'),
   nurtureStats: (start, end) => request('GET', `/nurture/stats?${query({ start, end })}`),
   nurtureEnrollments: (params) => request('GET', `/nurture/enrollments?${query(params)}`),
+  nurtureLeads: (params) => request('GET', `/nurture/leads?${query(params)}`),
   nurtureEnrollment: (id) => request('GET', `/nurture/enrollments/${encodeURIComponent(id)}`),
   nurtureAction: (id, action, body) =>
     request('POST', `/nurture/enrollments/${encodeURIComponent(id)}/${action}`, body),
