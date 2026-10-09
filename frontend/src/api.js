@@ -67,7 +67,8 @@ async function request(method, path, body) {
       throw new ApiError('Your access could not be confirmed. Reload the page and try again.', 403)
     }
     // The Vite proxy answers an empty 500 (or 502-504) when the backend is down.
-    if ((res.status >= 502 && res.status <= 504) || (res.status === 500 && !text)) {
+    // A 503 with a JSON reason is the backend reporting a database error: show it.
+    if (((res.status >= 502 && res.status <= 504) && data?.detail === undefined) || (res.status === 500 && !text)) {
       throw new ApiError('Cannot reach the backend. Is it running on port 8080?', 0)
     }
     throw new ApiError(describe(data?.detail, `Request failed (HTTP ${res.status})`), res.status)
