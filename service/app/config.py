@@ -142,6 +142,9 @@ class Settings(BaseSettings):
     nurture_reconcile_interval_seconds: int = 3600
 
     # --- Misc ---------------------------------------------------------------
+    # production: nurture emails go out automatically on schedule.
+    # dev: they are written but only sent when you click "Send now" (Review).
+    app_env: Literal["dev", "production"] = "production"
     dry_run: bool = False
     log_level: str = "INFO"
     # Optional bearer token for scripts/cron. The console itself signs in

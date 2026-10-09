@@ -94,3 +94,12 @@ def test_nurture_leads_page_and_select_all(client, monkeypatch):
     assert seen[0] == ("acme", "can_join", 2, 0)
     assert c.get("/nurture/leads", params={"view": "everyone"}).status_code == 422
     assert c.get("/nurture/eligible").json() == {"count": 2, "by_tier": {"Warm": 1, "Cold": 1}, "lead_ids": ["a", "b"]}
+
+
+def test_send_now_is_refused_in_production(client, monkeypatch):
+    from app.config import get_settings
+
+    c, _ = client
+    monkeypatch.setattr(get_settings(), "app_env", "production")
+    r = c.post("/nurture/messages/00000000-0000-0000-0000-000000000001/send-now")
+    assert r.status_code == 403 and "APP_ENV=dev" in r.json()["detail"]

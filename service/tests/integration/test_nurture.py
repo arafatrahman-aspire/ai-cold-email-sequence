@@ -561,3 +561,23 @@ async def test_leads_tab_lists_every_lead_with_its_nurture_state(database):
     assert [r["email"] for r in (await nrepo.browse(None, "can_join", *args, 50, 0))[0]] == ["cold@b.test"]
     assert [r["email"] for r in (await nrepo.browse(None, "in_nurture", *args, 50, 0))[0]] == ["warm@b.test"]
     assert (await nrepo.browse("hr manager", "all", *args, 50, 0))[1] == 1
+
+
+@pytest.mark.anyio
+async def test_dev_sends_only_with_send_now(world, monkeypatch):
+    """APP_ENV=dev: the send job sends nothing; Send now sends one email, outside any schedule."""
+    from app.config import get_settings
+    from app.nurture import jobs
+
+    pg, mail, start = world["pg"], world["mail"], world["start"]
+    monkeypatch.setattr(get_settings(), "app_env", "dev")
+    lead, eid = await enrolled(pg, "D-1", "ciso@w.test", "CISO", "Warm", start)
+    await jobs.generate_tick(start)
+    assert (await jobs.send_tick(start))["dev"].startswith("automatic sending is off")
+    assert mail.to("ciso@w.test") == []
+
+    mid = str(await pg.fetchval("select id from cold_email.nurture_messages where enrollment_id=$1::uuid", eid))
+    assert await jobs.send_now(mid) == "sent"
+    assert len(mail.to("ciso@w.test")) == 1
+    assert await jobs.send_now(mid) == "not_waiting"              # already sent
+    assert (await enrollment(pg, lead))["step"] == 1

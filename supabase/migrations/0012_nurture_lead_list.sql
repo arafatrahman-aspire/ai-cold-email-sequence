@@ -1,8 +1,11 @@
--- Email Nurture: every lead on the Leads tab
+-- Email Nurture: the Leads tab, and "Send now" for testing
 --
--- One function: the shared leads with their nurture state, so the console
--- can show all of them (not only those already in nurture) and enroll the
--- ones you tick. Reads only; changes no table. Safe to run more than once.
+--   nurture_browse    the shared leads with their nurture state, so the
+--                     console shows all of them and enrolls the ones you tick
+--   nurture_send_now  take one written email for sending right away
+--                     (only offered when APP_ENV=dev)
+--
+-- Adds two functions; changes no table. Safe to run more than once.
 -- Run after 0010.
 
 begin;
@@ -55,17 +58,46 @@ as $$
      limit least(greatest(p_limit, 1), 200) offset greatest(p_offset, 0);
 $$;
 
+-- Take one email for sending now, whatever its scheduled time (testing).
+-- Returns the same columns as nurture_claim_sending, or nothing if it is not
+-- waiting to be sent or its lead is no longer active in nurture.
+create or replace function cold_email.nurture_send_now(p_message_id uuid)
+returns table (message_id uuid, enrollment_id uuid, step int, subject text, preheader text,
+               body text, resource_id text, email text, first_name text, timezone text,
+               temperature text, started_at timestamptz, test_mode boolean)
+language sql security definer set search_path = ''
+as $$
+    with taken as (
+        update cold_email.nurture_messages m
+           set status = 'sending', send_at = now(), updated_at = now()
+          from cold_email.nurture_enrollments e
+         where m.id = p_message_id and e.id = m.enrollment_id
+           and m.status in ('ready','needs_approval') and e.status = 'active'
+        returning m.*
+    )
+    select t.id, t.enrollment_id, t.step, t.subject, t.preheader, t.body, t.resource_id,
+           e.email, coalesce(l.first_name, lp.first_name), l.timezone, e.temperature, e.started_at, e.test_mode
+      from taken t
+      join cold_email.nurture_enrollments e on e.id = t.enrollment_id
+      left join public.leads l on l.id = e.lead_id
+      left join public.lead_profiles lp on lp.lead_id = l.lead_id;
+$$;
+
+revoke all on function cold_email.nurture_send_now(uuid) from public;
 revoke all on function cold_email.nurture_browse(text, text, int, text[], boolean, int, int) from public;
 do $$
 begin
     if exists (select 1 from pg_roles where rolname = 'anon') then
         revoke all on function cold_email.nurture_browse(text, text, int, text[], boolean, int, int) from anon;
+        revoke all on function cold_email.nurture_send_now(uuid) from anon;
     end if;
     if exists (select 1 from pg_roles where rolname = 'authenticated') then
         revoke all on function cold_email.nurture_browse(text, text, int, text[], boolean, int, int) from authenticated;
+        revoke all on function cold_email.nurture_send_now(uuid) from authenticated;
     end if;
     if exists (select 1 from pg_roles where rolname = 'service_role') then
         grant execute on function cold_email.nurture_browse(text, text, int, text[], boolean, int, int) to service_role;
+        grant execute on function cold_email.nurture_send_now(uuid) to service_role;
     end if;
 end $$;
 

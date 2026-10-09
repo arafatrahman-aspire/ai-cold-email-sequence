@@ -250,6 +250,11 @@ function Console({ user, onLogout }) {
           </div>
           <div className="topbar-status">
             <HealthPill health={health} error={healthError} />
+            {health?.environment === 'dev' && (
+              <span className="badge badge-info" title="APP_ENV=dev in .env: nurture emails are sent only with Send now">
+                Dev
+              </span>
+            )}
             {health?.dry_run && (
               <span className="badge badge-info" title="DRY_RUN=true in .env: no email actually leaves">
                 Dry run

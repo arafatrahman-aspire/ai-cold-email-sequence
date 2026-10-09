@@ -102,6 +102,11 @@ async def send_check(enrollment_id: str) -> Optional[dict[str, Any]]:
     return await db.rpc("nurture_send_check", p_enrollment_id=enrollment_id)
 
 
+async def send_now(message_id: str) -> list[dict[str, Any]]:
+    """Take one email for sending right away (APP_ENV=dev). Empty if it is not waiting."""
+    return await db.rows("nurture_send_now", p_message_id=message_id)
+
+
 async def mark_sent(message_id: str, smtp_message_id: str, next_send_at: Optional[datetime]) -> bool:
     return bool(await db.rpc("nurture_mark_sent", p_message_id=message_id,
                              p_smtp_message_id=smtp_message_id, p_next_send_at=next_send_at))

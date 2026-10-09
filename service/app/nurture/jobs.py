@@ -116,7 +116,10 @@ async def _blocked(m: dict[str, Any], cfg: dict[str, Any]) -> Optional[str]:
     return None
 
 
-async def _send_one(m: dict[str, Any], cfg: dict[str, Any], ctx: dict[str, Any], now: datetime) -> str:
+async def _send_one(m: dict[str, Any], cfg: dict[str, Any], ctx: dict[str, Any], now: datetime,
+                    manual: bool = False) -> str:
+    """Send one claimed email. ``manual`` (Send now) skips the sending window;
+    every other check still applies."""
     mid, eid = str(m["message_id"]), str(m["enrollment_id"])
     blocked = await _blocked(m, cfg)
     if blocked:
@@ -130,7 +133,7 @@ async def _send_one(m: dict[str, Any], cfg: dict[str, Any], ctx: dict[str, Any],
     minutes = test if m.get("test_mode") else None
     tz = cadence.lead_timezone(m.get("timezone"), cfg["default_timezone"])
     hours = options.window(cfg)
-    if not minutes and not within_business_hours(now, tz, hours):
+    if not manual and not minutes and not within_business_hours(now, tz, hours):
         await nrepo.unsend(mid, "ready", cadence.into_window(now, tz, hours))
         return "deferred_hours"
     if ctx["sent"] >= int(cfg["daily_cap"]):
@@ -175,6 +178,41 @@ async def _send_one(m: dict[str, Any], cfg: dict[str, Any], ctx: dict[str, Any],
     return "sent"
 
 
+async def _send_context(cfg: dict[str, Any], now: datetime) -> dict[str, Any]:
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return {
+        "sent": await nrepo.sent_since(day_start),
+        "box": await sending.sending_inbox(),
+        "reply_to": await sending.reply_to(),
+        "public": sending.public_url(),
+        "allow": options.allow_list(cfg),
+        "resources": {r["id"]: r for r in await content.resources()},
+    }
+
+
+async def send_now(message_id: str) -> str:
+    """Send one email immediately (APP_ENV=dev, the Review tab's "Send now").
+    The sending window is skipped; the pause switch, eligibility re-check,
+    test-mode allow-list and daily limit still apply."""
+    now = datetime.now(timezone.utc)
+    cfg = await options.load(fresh=True)
+    if cfg["paused"]:
+        return "paused"
+    problems = await sending.problems(cfg)
+    if problems:
+        return "not configured: " + "; ".join(problems)
+    rows = await nrepo.send_now(message_id)
+    if not rows:
+        return "not_waiting"
+    m = rows[0]
+    try:
+        return await _send_one(m, cfg, await _send_context(cfg, now), now, manual=True)
+    except Exception as exc:
+        log.exception("nurture: send now of %s failed", message_id)
+        await nrepo.unsend(message_id, "ready", now + timedelta(minutes=15), f"unexpected: {exc}")
+        return "failed"
+
+
 async def send_tick(now: Optional[datetime] = None) -> dict[str, Any]:
     now = now or datetime.now(timezone.utc)
     cfg = await options.load(fresh=True)
@@ -185,15 +223,12 @@ async def send_tick(now: Optional[datetime] = None) -> dict[str, Any]:
     if problems:
         return {"not_configured": problems}
 
-    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    ctx: dict[str, Any] = {
-        "sent": await nrepo.sent_since(day_start),
-        "box": await sending.sending_inbox(),
-        "reply_to": await sending.reply_to(),
-        "public": sending.public_url(),
-        "allow": options.allow_list(cfg),
-        "resources": {r["id"]: r for r in await content.resources()},
-    }
+    if get_settings().app_env == "dev":
+        # Dev: nothing goes out on its own; "Send now" in Review sends one email.
+        notified = await exits.notify_pending(cfg)
+        return {"dev": "automatic sending is off (APP_ENV=dev)", **({"notified": notified} if notified else {})}
+
+    ctx = await _send_context(cfg, now)
     room = int(cfg["daily_cap"]) - ctx["sent"]
     if room > 0:
         for m in await nrepo.claim_sending(now, min(int(cfg["batch_size"]), room)):

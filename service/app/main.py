@@ -177,6 +177,7 @@ async def health() -> dict:
         "mail_reader": s.mail_reader,
         "workers": s.run_workers,
         "dry_run": s.dry_run,
+        "environment": s.app_env,
         # Background jobs: interval and next run (empty when RUN_WORKERS=false).
         "schedule": scheduler.status(),
     }

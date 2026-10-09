@@ -3,7 +3,7 @@ import { api } from '../../api.js'
 import { EXIT_REASONS, MESSAGE_STATUS, NURTURE_PERSONAS, relativeTime, shortDateTime, TEMPERATURES } from '../../labels.js'
 import { AutoTextarea, Badge, Card, ErrorNote, Spinner, useAction } from '../ui.jsx'
 
-function MessageCard({ m, onChanged }) {
+function MessageCard({ m, onChanged, dev }) {
   const [subject, setSubject] = useState(m.subject || '')
   const [preheader, setPreheader] = useState(m.preheader || '')
   const [body, setBody] = useState(m.body || '')
@@ -16,6 +16,10 @@ function MessageCard({ m, onChanged }) {
   const [{ busy, error }, act] = useAction(async (what) => {
     if (dirty && what !== 'reject') await api.nurtureEditMessage(m.id, { subject: subject.trim(), preheader: preheader.trim(), body: body.trim() })
     if (what === 'approve' || what === 'reject') await api.nurtureDecide(m.id, what)
+    if (what === 'send') {
+      if (!window.confirm(`Send this email to ${m.email} now?`)) return false
+      await api.nurtureSendNow(m.id)
+    }
     onChanged()
     return true
   })
@@ -49,7 +53,9 @@ function MessageCard({ m, onChanged }) {
       </div>
       <div className="reply-actions">
         <span className={m.status === 'needs_approval' ? 'auto-send waits' : 'auto-send'}>
-          {m.status === 'needs_approval'
+          {dev
+            ? <>Dev mode: goes out only when you click Send now{m.status === 'needs_approval' ? ' (sending also approves it)' : ''}</>
+            : m.status === 'needs_approval'
             ? <>Waits for your approval{new Date(m.send_at) < new Date() ? ' (its send time has passed)' : ''}: due {shortDateTime(m.send_at)}</>
             : new Date(m.send_at) <= new Date()
               ? <>Due now: goes out on the next send cycle unless you reject it</>
@@ -59,7 +65,13 @@ function MessageCard({ m, onChanged }) {
           {dirty && <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { setSubject(m.subject || ''); setPreheader(m.preheader || ''); setBody(m.body || '') }}>Undo edits</button>}
           <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => act('reject')} title="It is written again (after two rejections the pre-approved text is used)">Reject</button>
           {dirty && <button className="btn btn-sm" disabled={busy} onClick={() => act('save')}>Save edits</button>}
-          {m.status !== 'approved' && (
+          {dev && (
+            <button className="btn btn-primary btn-sm" disabled={busy || !subject.trim() || !body.trim()} onClick={() => act('send')}
+              title="APP_ENV=dev: send this email now, ignoring its scheduled time and the sending window">
+              {busy ? <Spinner /> : null} {dirty ? 'Save & send now' : 'Send now'}
+            </button>
+          )}
+          {m.status === 'needs_approval' && (
             <button className="btn btn-primary btn-sm" disabled={busy || !subject.trim() || !body.trim()} onClick={() => act('approve')}>
               {busy ? <Spinner /> : null} {dirty ? 'Save & approve' : 'Approve'}
             </button>
@@ -74,10 +86,12 @@ function MessageCard({ m, onChanged }) {
 export default function NurtureReview() {
   const [messages, setMessages] = useState(null)
   const [mode, setMode] = useState(null)
+  const [dev, setDev] = useState(false)
   const [{ busy, error }, load] = useAction(async () => {
-    const [r, s] = await Promise.all([api.nurtureReview(), api.nurtureSettings()])
+    const [r, s, st] = await Promise.all([api.nurtureReview(), api.nurtureSettings(), api.nurtureStatus()])
     setMessages(r.messages || [])
     setMode(s.settings.approval)
+    setDev(st.environment === 'dev')
   })
   useEffect(() => {
     load()
@@ -95,7 +109,10 @@ export default function NurtureReview() {
       <div className="toolbar">
         <div>
           <h1>Review queue</h1>
-          <p className="muted">Emails written ahead of their send time. {modeText} Change this in Settings → Review.</p>
+          <p className="muted">
+            Emails written ahead of their send time.{' '}
+            {dev ? 'APP_ENV=dev: nothing is sent automatically; use Send now to test each email.' : `${modeText} Change this in Settings → Review.`}
+          </p>
         </div>
         <button className="btn" onClick={() => load()} disabled={busy}>{busy ? <Spinner /> : null} Refresh</button>
       </div>
@@ -103,11 +120,11 @@ export default function NurtureReview() {
       {messages && (
         <>
           <Card title={`Waiting for approval (${waiting.length})`}>
-            {waiting.length ? <ul className="replies">{waiting.map((m) => <MessageCard key={m.id} m={m} onChanged={load} />)}</ul>
+            {waiting.length ? <ul className="replies">{waiting.map((m) => <MessageCard key={m.id} m={m} onChanged={load} dev={dev} />)}</ul>
               : <p className="muted">Nothing is waiting for you.</p>}
           </Card>
           <Card title={`Going out in the next 3 days (${upcoming.length})`}>
-            {upcoming.length ? <ul className="replies">{upcoming.map((m) => <MessageCard key={m.id} m={m} onChanged={load} />)}</ul>
+            {upcoming.length ? <ul className="replies">{upcoming.map((m) => <MessageCard key={m.id} m={m} onChanged={load} dev={dev} />)}</ul>
               : <p className="muted">No emails scheduled in the next 3 days.</p>}
           </Card>
         </>

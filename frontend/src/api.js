@@ -132,6 +132,7 @@ export const api = {
   nurtureEnroll: (body) => request('POST', '/nurture/enroll', body),
   nurtureReview: () => request('GET', '/nurture/review'),
   nurtureEditMessage: (id, edit) => request('PUT', `/nurture/messages/${encodeURIComponent(id)}`, edit),
+  nurtureSendNow: (id) => request('POST', `/nurture/messages/${encodeURIComponent(id)}/send-now`),
   nurtureDecide: (id, decision) => request('POST', `/nurture/messages/${encodeURIComponent(id)}/${decision}`),
   nurtureHandoffs: () => request('GET', '/nurture/handoffs'),
   nurtureBriefs: () => request('GET', '/nurture/content/briefs'),

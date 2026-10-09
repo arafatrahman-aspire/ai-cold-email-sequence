@@ -209,6 +209,7 @@ def console_router(require_user: Callable) -> APIRouter:
         box = await sending.sending_inbox()
         return {
             "paused": cfg["paused"],
+            "environment": get_settings().app_env,
             "test_mode": cfg["test_mode"],
             "problems": await sending.problems(cfg),
             "warnings": await sending.warnings(),
@@ -364,6 +365,16 @@ def console_router(require_user: Callable) -> APIRouter:
 
     @router.post("/messages/{message_id}/{decision}")
     async def decide(message_id: UUID, decision: str, user: dict = Depends(require_user)) -> dict:
+        if decision == "send-now":
+            # Testing only: production sends on schedule.
+            if get_settings().app_env != "dev":
+                raise HTTPException(status_code=403, detail="Send now is only available when APP_ENV=dev")
+            outcome = await jobs.send_now(str(message_id))
+            if outcome == "not_waiting":
+                raise HTTPException(status_code=409, detail="this email is not waiting to be sent")
+            if outcome != "sent":
+                raise HTTPException(status_code=409, detail=f"not sent: {outcome}")
+            return {"ok": True, "outcome": outcome}
         if decision not in ("approve", "reject"):
             raise HTTPException(status_code=404, detail="unknown action")
         if not await nrepo.review_message(str(message_id), decision):
