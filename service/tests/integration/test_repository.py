@@ -740,3 +740,43 @@ async def test_lead_browser_enroll_and_remove(database):
     assert await repo.retry_enrollment(lead) is True
     assert (await repo.lead_for_step(lead))["status"] == "ready_for_outreach"
     assert (await pg.fetchrow("select status from public.leads where lead_id='L-1'"))["status"] == "New"
+
+
+@pytest.mark.anyio
+async def test_view_and_edit_drafted_emails(database):
+    """The Enroll page's Emails panel: the current sequence in step order, and
+    edits only while an email is still waiting to be sent."""
+    from app import repository as repo
+
+    pg = database
+    await _seed(pg)
+    assert (await repo.enroll_lead("L-1", CONTACTABLE, True))[0] == "enrolled"
+    lead = str(await pg.fetchval("select id from public.leads where lead_id='L-1'"))
+    now = datetime.now(timezone.utc)
+    dues = [now + timedelta(hours=1), now + timedelta(days=3), now + timedelta(days=6)]
+    old = [{"step_number": i, "subject": f"old{i}", "body": "b"} for i in (1, 2, 3)]
+    await repo.store_sequence(lead, "ciso", "keyword", "g", "m", old, dues)
+    await pg.execute("update cold_email.emails set status='sent', sent_at=now()"
+                     " where lead_id=$1::uuid and step_number=1", lead)
+    new = [{"step_number": i, "subject": f"new{i}", "body": "b"} for i in (1, 2, 3)]
+    await repo.store_sequence(lead, "ciso", "keyword", "g", "m", new, dues)
+
+    # Sent email of the old version stays; its unsent ones (cancelled) do not show.
+    rows = await repo.lead_emails(lead)
+    assert [(r["step_number"], r["subject"], r["status"]) for r in rows] == [
+        (1, "old1", "sent"), (1, "new1", "pending"), (2, "new2", "pending"), (3, "new3", "pending")]
+
+    pending = rows[2]["id"]
+    assert await repo.edit_email(pending, "Edited subject", "Edited body") is True
+    row = await pg.fetchrow("select subject, body from cold_email.emails where id=$1::uuid", pending)
+    assert (row["subject"], row["body"]) == ("Edited subject", "Edited body")
+    # The sender sends what is stored, so the edit is what goes out.
+    await pg.execute("update cold_email.emails set due_at=now() - interval '1 minute' where id=$1::uuid", pending)
+    claimed = [r for r in await repo.claim_due_steps(10) if str(r["id"]) == pending]
+    assert claimed and claimed[0]["subject"] == "Edited subject"
+
+    # Too late: being sent, sent, or cancelled.
+    assert await repo.edit_email(pending, "x", "y") is False
+    assert await repo.edit_email(rows[0]["id"], "x", "y") is False
+    assert await repo.remove_from_sequence(lead, "x") == "removed"
+    assert await repo.edit_email(rows[3]["id"], "x", "y") is False

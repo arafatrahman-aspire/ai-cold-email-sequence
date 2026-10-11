@@ -535,3 +535,8 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
 .nowrap { white-space: nowrap; }
+
+.lead-emails { padding: 4px 0 12px; }
+.lead-emails .drafts { list-style: none; margin: 0; padding: 0; }
+.lead-emails .reply-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.email-body { white-space: pre-wrap; }

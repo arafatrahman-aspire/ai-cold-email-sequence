@@ -17,6 +17,7 @@ from typing import Any, Optional
 from app import repository as repo
 from app.config import get_settings
 from app.mail.base import Inbox, MailSender
+from app.mail.brevo_sender import BrevoSender
 from app.mail.smtp_sender import SMTPSender
 
 _transport: Optional[MailSender] = None
@@ -51,10 +52,11 @@ async def sending_inbox() -> Optional[Inbox]:
 
 
 def transport() -> MailSender:
-    """SMTP, whatever MAIL_SENDER the cold sequence uses."""
+    """Brevo when MAIL_SENDER=brevo, otherwise SMTP (also when the cold
+    sequence uses Graph)."""
     global _transport
     if _transport is None:
-        _transport = SMTPSender()
+        _transport = BrevoSender() if get_settings().mail_sender == "brevo" else SMTPSender()
     return _transport
 
 
@@ -80,6 +82,9 @@ async def problems(cfg: dict[str, Any]) -> list[str]:
     box = await sending_inbox()
     if box is None:
         out.append("No account to send from: add an active cold inbox, or set NURTURE_FROM_EMAIL in .env")
+    elif get_settings().mail_sender == "brevo":
+        if not get_settings().brevo_api_key:
+            out.append("MAIL_SENDER=brevo but BREVO_API_KEY is not set in .env")
     elif box.id == "nurture" and not os.environ.get("NURTURE_SMTP_PASSWORD"):
         out.append("NURTURE_SMTP_PASSWORD is not set in .env")
     if not public_url():

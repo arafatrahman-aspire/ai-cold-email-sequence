@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { api } from '../api.js'
-import { ENROLLMENT_BADGE, enrollOutcome, formatNumber, shortDateTime } from '../labels.js'
-import { Badge, Card, ErrorNote, Field, Spinner, useAction } from './ui.jsx'
+import { EMAIL_STATUSES, ENROLLMENT_BADGE, enrollOutcome, formatNumber, relativeTime, shortDateTime } from '../labels.js'
+import { AutoTextarea, Badge, Card, ErrorNote, Field, Spinner, useAction } from './ui.jsx'
 
 const PAGE = 50
 
@@ -65,6 +65,91 @@ function RowAction({ lead, busy, onAct }) {
   return null
 }
 
+// Leads whose sequence has been drafted: their emails can be read and,
+// until each is sent, edited.
+const HAS_EMAILS = (l) => l.enrollment_status && !['ready_for_outreach', 'processing'].includes(l.enrollment_status)
+
+const EMAIL_LABEL = Object.fromEntries(EMAIL_STATUSES)
+const EMAIL_TONE = { pending: 'neutral', sending: 'warning', sent: 'good', cancelled: 'neutral', failed: 'bad' }
+
+function EmailCard({ m, onChanged }) {
+  const [subject, setSubject] = useState(m.subject)
+  const [body, setBody] = useState(m.body)
+  useEffect(() => {
+    setSubject(m.subject)
+    setBody(m.body)
+  }, [m.subject, m.body])
+  const editable = m.status === 'pending'
+  const dirty = subject !== m.subject || body !== m.body
+  const [{ busy, error }, save] = useAction(async () => {
+    await api.editEmail(m.id, subject.trim(), body.trim())
+    await onChanged()
+  })
+  return (
+    <li className="draft">
+      <div className="reply-head">
+        <strong>Email {m.step_number}</strong>
+        <span className="badge-row">
+          <Badge tone={EMAIL_TONE[m.status] || 'neutral'}>{EMAIL_LABEL[m.status] || m.status}</Badge>
+        </span>
+      </div>
+      {editable ? (
+        <div className="nurture-edit">
+          <input aria-label="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
+          <AutoTextarea aria-label="Body" minRows={6} value={body} onChange={(e) => setBody(e.target.value)} />
+        </div>
+      ) : (
+        <div className="nurture-edit">
+          <strong>{m.subject}</strong>
+          <div className="email-body">{m.body}</div>
+        </div>
+      )}
+      <div className="reply-actions">
+        <span className="muted">
+          {m.status === 'sent' && m.sent_at && <>Sent {shortDateTime(m.sent_at)}</>}
+          {editable && <>Sends automatically <strong>{relativeTime(m.due_at)}</strong> ({shortDateTime(m.due_at)}), as written here</>}
+          {m.status === 'sending' && <>Being sent right now; it can no longer be changed</>}
+          {m.status === 'failed' && <>Failed{m.last_error ? `: ${m.last_error}` : ''}</>}
+          {m.status === 'cancelled' && <>Will not be sent{m.last_error ? ` (${m.last_error})` : ''}</>}
+        </span>
+        {editable && dirty && (
+          <div className="draft-buttons">
+            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { setSubject(m.subject); setBody(m.body) }}>Undo edits</button>
+            <button className="btn btn-primary btn-sm" disabled={busy || !subject.trim() || !body.trim()} onClick={() => save()}>
+              {busy ? <Spinner /> : null} Save
+            </button>
+          </div>
+        )}
+      </div>
+      <ErrorNote error={error} />
+    </li>
+  )
+}
+
+function LeadEmails({ lead }) {
+  const [emails, setEmails] = useState(null)
+  const [{ busy, error }, load] = useAction(async () => {
+    setEmails((await api.leadEmails(lead.id)).emails)
+  })
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead.id])
+  if (!emails) return busy ? <Spinner label="Loading emails…" /> : <ErrorNote error={error} onRetry={load} />
+  return (
+    <div className="lead-emails">
+      <ErrorNote error={error} onRetry={load} />
+      {emails.length ? (
+        <ul className="drafts">
+          {emails.map((m) => <EmailCard key={m.id} m={m} onChanged={load} />)}
+        </ul>
+      ) : (
+        <p className="muted">No emails drafted for {who(lead)} yet.</p>
+      )}
+    </div>
+  )
+}
+
 function confirmText(action, leads) {
   const many = leads.length > 1
   const name = many ? `${leads.length} leads` : who(leads[0])
@@ -85,6 +170,13 @@ function LeadBrowser() {
   const [data, setData] = useState(null)
   const [selected, setSelected] = useState(() => new Map())
   const [notice, setNotice] = useState(null)
+  const [open, setOpen] = useState(() => new Set())
+  const toggleOpen = (id) =>
+    setOpen((o) => {
+      const next = new Set(o)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
 
   const [{ busy: loading, error }, load] = useAction(async () => {
     setData(await api.leads({ search: query, view, limit: PAGE, offset }))
@@ -253,7 +345,8 @@ function LeadBrowser() {
               </thead>
               <tbody>
                 {leads.map((l) => (
-                  <tr key={l.id} className={selected.has(l.id) ? 'is-selected' : undefined}>
+                  <Fragment key={l.id}>
+                  <tr className={selected.has(l.id) ? 'is-selected' : undefined}>
                     <td className="col-check">
                       {actionFor(l) && (
                         <input type="checkbox" checked={selected.has(l.id)} onChange={() => toggle(l)}
@@ -274,8 +367,22 @@ function LeadBrowser() {
                       <div className="muted">{l.lead_status}</div>
                     </td>
                     <td><SequenceState lead={l} /></td>
-                    <td className="col-action"><RowAction lead={l} busy={busy} onAct={act} /></td>
+                    <td className="col-action">
+                      {HAS_EMAILS(l) && (
+                        <button className="btn btn-sm" aria-expanded={open.has(l.id)} onClick={() => toggleOpen(l.id)}>
+                          {open.has(l.id) ? 'Hide emails' : 'Emails'}
+                        </button>
+                      )}{' '}
+                      <RowAction lead={l} busy={busy} onAct={act} />
+                    </td>
                   </tr>
+                  {open.has(l.id) && (
+                    <tr className="lead-emails-row">
+                      <td />
+                      <td colSpan={5}><LeadEmails lead={l} /></td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

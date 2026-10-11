@@ -100,6 +100,8 @@ export const api = {
   leads: ({ search = '', view = 'all', limit = 50, offset = 0 } = {}) =>
     request('GET', `/leads?${new URLSearchParams({ search, view, limit, offset })}`),
   removeFromSequence: (leadIds) => request('POST', '/enrollments/remove', { lead_ids: leadIds }),
+  leadEmails: (leadId) => request('GET', `/enrollments/${encodeURIComponent(leadId)}/emails`),
+  editEmail: (id, subject, body) => request('PUT', `/emails/${encodeURIComponent(id)}`, { subject, body }),
   retry: (leadId, overrides) =>
     request('POST', `/enrollments/${encodeURIComponent(leadId)}/retry`, overrides || {}),
 

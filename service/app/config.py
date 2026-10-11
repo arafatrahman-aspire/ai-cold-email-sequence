@@ -58,7 +58,8 @@ class Settings(BaseSettings):
     # --- Mail transport -----------------------------------------------------
     # "smtp"  -> plain SMTP submission (VPS relay, Outlook, Zoho, anything)
     # "graph" -> Microsoft Graph /sendMail with an Entra app
-    mail_sender: Literal["smtp", "graph"] = "smtp"
+    # "brevo" -> Brevo transactional API (BREVO_API_KEY); also used by nurture
+    mail_sender: Literal["smtp", "graph", "brevo"] = "smtp"
     # "imap"  -> IMAP polling
     # "graph" -> Microsoft Graph /messages polling
     mail_reader: Literal["imap", "graph"] = "imap"
@@ -76,6 +77,10 @@ class Settings(BaseSettings):
     imap_ssl: bool = True
     imap_folder: str = "INBOX"
     imap_timeout_seconds: float = 60.0
+
+    # Brevo (only needed when MAIL_SENDER is "brevo").
+    brevo_api_key: str = ""
+    brevo_base_url: str = "https://api.brevo.com"
 
     # Microsoft Graph (only needed when a provider is "graph").
     graph_tenant_id: str = ""

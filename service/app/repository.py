@@ -83,6 +83,16 @@ async def remove_from_sequence(lead_id: str, reason: str) -> str:
     return str(await db.rpc("remove_from_sequence", p_lead_id=lead_id, p_reason=reason))
 
 
+async def lead_emails(lead_id: str) -> list[dict[str, Any]]:
+    """The lead's current sequence, sent emails included (0013_cold_email_edit.sql)."""
+    return await db.rows("lead_emails", p_lead_id=lead_id)
+
+
+async def edit_email(email_id: str, subject: str, body: str) -> bool:
+    """False once it is no longer waiting (being sent, sent or cancelled)."""
+    return bool(await db.rpc("edit_email", p_id=email_id, p_subject=subject, p_body=body))
+
+
 async def auto_enroll(
     sources: list[str],
     contactable_statuses: list[str],

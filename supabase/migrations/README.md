@@ -19,6 +19,8 @@ never altered. The single write to a shared table anywhere is setting
 | `0009_lead_browser.sql` | Enroll page: list every lead, enroll or remove with one click |
 | `0010_nurture.sql` | Email Nurture: 3 tables (enrollments, emails, timeline) and their functions. Briefs, fallback emails and resources live in the existing `settings` table |
 | `0011_nurture_and_cold.sql` | One sequence at a time: three cold functions get one extra line each, marked `-- NEW` |
+| `0012_nurture_lead_list.sql` | Nurture Leads tab (all leads, tick to enroll) and "Send now" for APP_ENV=dev |
+| `0013_cold_email_edit.sql` | See and edit a lead's drafted cold emails before they are sent |
 
 After running a file, nothing else is needed: each ends by telling the API to
 reload. The first time only: Project Settings → Data API → Exposed schemas →

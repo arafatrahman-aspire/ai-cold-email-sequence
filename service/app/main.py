@@ -152,6 +152,11 @@ ENROLLMENT_STATUSES = {
 }
 
 
+class EmailEdit(BaseModel):
+    subject: str = Field(min_length=1, max_length=300)
+    body: str = Field(min_length=1, max_length=20000)
+
+
 class SettingUpdate(BaseModel):
     value: object
     description: Optional[str] = None
@@ -314,6 +319,20 @@ async def retry_enrollment(lead_id: UUID, request: RetryRequest | None = None) -
             detail="only enrollments in manual_review, failed or stopped can be retried",
         )
     return {"lead_id": str(lead_id), "status": "ready_for_outreach"}
+
+
+@app.get("/enrollments/{lead_id}/emails", dependencies=[Depends(require_user)])
+async def lead_emails(lead_id: UUID) -> dict:
+    """The lead's drafted emails (and sent ones), in step order."""
+    return {"emails": await repo.lead_emails(str(lead_id))}
+
+
+@app.put("/emails/{email_id}", dependencies=[Depends(require_user)])
+async def edit_email(email_id: UUID, request: EmailEdit) -> dict:
+    """Change an email that has not been sent yet. It goes out as edited."""
+    if not await repo.edit_email(str(email_id), request.subject.strip(), request.body.strip()):
+        raise HTTPException(status_code=409, detail="this email is no longer waiting to be sent")
+    return {"ok": True}
 
 
 @app.post("/run/intake", dependencies=[Depends(require_user)])

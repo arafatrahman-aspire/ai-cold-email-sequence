@@ -6,6 +6,7 @@ from typing import Optional
 
 from app.config import get_settings
 from app.mail.base import MailError, MailReader, MailSender
+from app.mail.brevo_sender import BrevoSender
 from app.mail.graph_reader import GraphReader
 from app.mail.graph_sender import GraphSender
 from app.mail.imap_reader import IMAPReader
@@ -23,6 +24,8 @@ def get_sender() -> MailSender:
             _sender = SMTPSender()
         elif name == "graph":
             _sender = GraphSender()
+        elif name == "brevo":
+            _sender = BrevoSender()
         else:
             raise MailError(f"unknown MAIL_SENDER: {name}", permanent=True)
     return _sender
