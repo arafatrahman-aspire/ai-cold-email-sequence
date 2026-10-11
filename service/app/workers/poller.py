@@ -139,6 +139,10 @@ async def _start_tracking(inbox: Inbox) -> bool:
 async def poll_inbox(inbox: Inbox) -> tuple[dict[str, int], str | None]:
     """Poll one inbox. Returns outcome counts and, if it failed, why."""
     stats: dict[str, int] = {}
+    if (inbox.config or {}).get("read") is False:
+        # Send-only inbox (inboxes.config {"read": false}): its replies are
+        # forwarded to, or reply-to'd at, an inbox that is read.
+        return stats, None
     try:
         if inbox.poll_cursor == 0 and await _start_tracking(inbox):
             return {"tracking_started": 1}, None

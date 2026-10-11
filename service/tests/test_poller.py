@@ -133,3 +133,16 @@ async def test_failure_reason_is_reported(monkeypatch, fake_repo):
         "error": 1,
         "errors": ["me@example.com: IMAP auth failed for me@example.com: bad password"],
     }
+
+
+@pytest.mark.anyio
+async def test_send_only_inbox_is_not_read(monkeypatch, fake_repo):
+    """inboxes.config {"read": false}: a mailbox we cannot log in to (its
+    replies are forwarded to an inbox that is read) is skipped, no error."""
+    reader = FakeReader(fail=MailError("IMAP auth failed"))
+    monkeypatch.setattr(poller, "get_reader", lambda: reader)
+    inbox = _inbox(118)
+    inbox.config = {"read": False}
+
+    assert await poller.poll_inbox(inbox) == ({}, None)
+    assert reader.fetched is False
