@@ -48,3 +48,4 @@
 {"id": "un-06", "category": "unsubscribe", "subject": "Re: compliance", "body": "I never signed up for this. Delete my details please."}
 {"id": "un-07", "category": "unsubscribe", "subject": "Re: follow up", "body": "Please stop. Third email this month, I'm not interested and don't want to hear from you."}
 {"id": "un-08", "category": "unsubscribe", "subject": "RE: awareness", "body": "Opt me out of all future emails."}
+{"id": "int-11", "category": "interested", "subject": "Re: Security risk reporting", "body": "They all work for me.", "offered": ["Monday 12 October, 09:00-09:30 (Asia/Dhaka)", "Tuesday 13 October, 09:00-09:30 (Asia/Dhaka)"], "chosen_slot": 1}

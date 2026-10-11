@@ -189,7 +189,7 @@ async def test_an_offered_time_that_has_passed_is_offered_again(monkeypatch, db,
     [d] = db["drafts"]
     assert d["kind"] == "slot_unavailable" and len(d["offered"]) == 2
     assert all(datetime.fromisoformat(s["start"]) > NOW for s in d["offered"])
-    assert "the time they picked has passed: offered others" in db["saved"]["extracted"]["actions"]
+    assert "the time they picked has passed" in db["saved"]["extracted"]["actions"]
 
 
 @pytest.mark.anyio

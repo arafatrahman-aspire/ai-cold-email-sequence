@@ -164,6 +164,15 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
         if around is None or not new_offer:
             new_offer = pick_slots(found, tz, hours, now, count, notice)
         slot_lines = [describe_slot(s, tz) for s in new_offer]
+        if not new_offer:
+            # Nothing to offer: the draft asks for their times, and a person
+            # checks it first instead of it going out on its own.
+            needs_human = True
+            done.append(
+                f"no free calendar time falls in their business hours "
+                f"({hours.start_hour}:00-{hours.end_hour}:00 {tz})" if found
+                else f"the calendar has no free time in the next {meeting_cfg['days_ahead']} days"
+            )
 
     async def book(slot: Slot) -> bool:
         nonlocal booked, meeting_url
@@ -219,9 +228,9 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
                     slot = offered[extracted["chosen_slot"] - 1]
                     if slot.start <= now + timedelta(minutes=30):
                         # They answered too late: that time has passed.
-                        await offer_slots()
                         draft_kind = "slot_unavailable"
-                        done.append("the time they picked has passed: offered others")
+                        done.append("the time they picked has passed")
+                        await offer_slots()
                         continue
                 else:
                     when = datetime.fromisoformat(extracted["proposed_time"])
@@ -233,9 +242,9 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
                         continue
                     slot = find_slot(free, when)
                     if slot is None:
-                        await offer_slots(around=when)
                         draft_kind = "slot_unavailable"
-                        done.append("their time was not free: offered others")
+                        done.append("their time was not free")
+                        await offer_slots(around=when)
                         continue
                 try:
                     await book(slot)
@@ -244,12 +253,13 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
                         draft_kind, needs_human = "meeting_offer", True
                         done.append(f"booking failed ({exc}); a person should book it")
                         continue
-                    await offer_slots()
                     draft_kind = "slot_unavailable"
-                    done.append("slot was taken: offered others")
+                    done.append("slot was taken")
+                    await offer_slots()
             elif action == "offer_slots":
                 await offer_slots()
-                done.append(f"offered {len(new_offer)} slot(s)" if new_offer else "no free slots found")
+                if new_offer:
+                    done.append(f"offered {len(new_offer)} slot(s)")
 
         draft_id = None
         if draft_kind:

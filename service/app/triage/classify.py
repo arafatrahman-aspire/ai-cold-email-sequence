@@ -49,7 +49,9 @@ Also extract, ONLY when the reply states it explicitly (never guess or invent):
   field not given is null. Never construct an email address.
 - return_date: for out_of_office, the date they are back, as YYYY-MM-DD.
 - chosen_slot: if they accept one of the numbered time options we offered,
-  its number (1, 2, ...). null otherwise.
+  its number (1, 2, ...). If they say any, all or either of them works
+  ("they all work", "either is fine", "whichever suits you"), 1 (the
+  earliest). null otherwise.
 - proposed_time: if they propose a specific other date and time, as ISO 8601
   with UTC offset, resolved using the lead's timezone and today's date given
   below. null if no specific time.
