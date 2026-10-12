@@ -10,14 +10,49 @@ function pct(n) {
   return n == null ? '—' : `${Math.round(n * 100)}%`
 }
 
+const plural = (n, one, many = `${one}s`) => `${formatNumber(n)} ${n === 1 ? one : many}`
+
+// "Check for replies now", in plain words.
+function CheckResult({ mail, sorted }) {
+  const got = [
+    mail.reply && plural(mail.reply, 'new reply', 'new replies'),
+    mail.auto_reply && plural(mail.auto_reply, 'auto-reply', 'auto-replies'),
+    mail.unsubscribe && plural(mail.unsubscribe, 'unsubscribe'),
+    mail.bounce && plural(mail.bounce, 'bounce'),
+  ].filter(Boolean)
+  const sortedCount = Object.entries(sorted).filter(([k]) => k in CATEGORIES).reduce((a, [, v]) => a + v, 0)
+  const parts = [
+    got.length ? `Found ${got.join(', ')}` : 'No new replies in the inbox',
+    sortedCount ? `sorted ${plural(sortedCount, 'reply', 'replies')}` : null,
+    sorted.drafts_sent ? `sent ${plural(sorted.drafts_sent, 'approved answer')}` : null,
+    sorted.deferred ? `${formatNumber(sorted.deferred)} will be retried (AI unavailable)` : null,
+  ].filter(Boolean)
+  const errors = mail.errors || []
+  return (
+    <div className={`note ${errors.length ? 'note-warning' : 'note-good'}`} role="status">
+      <Badge tone={errors.length ? 'warning' : 'good'}>{errors.length ? 'Partly checked' : 'Checked'}</Badge>
+      <div>
+        <div>{parts.join(' · ')}.</div>
+        {errors.map((e) => <div key={e} className="muted">Could not read {e}</div>)}
+      </div>
+    </div>
+  )
+}
+
 function ReplyCard({ reply, onChanged }) {
   const category = reply.human_category || reply.category
   const [tone, label] = CATEGORIES[category] || ['neutral', 'Not classified']
   const [sTone, sLabel] = TRIAGE_STATUS[reply.triage_status] || ['neutral', reply.triage_status || '']
   const actions = reply.extracted?.actions || []
-  const [{ busy, error }, rerun] = useAction((cat) => api.retriage(reply.id, cat))
+  const [{ busy, error }, rerun] = useAction(async (cat) => {
+    await api.retriage(reply.id, cat)
+    await api.run('triage') // act on it now instead of within the minute
+    return true
+  })
 
   const change = async (cat) => {
+    const what = cat ? `Sort this reply as "${CATEGORIES[cat][1]}" and act on it` : 'Let the AI read this reply again and act on it'
+    if (!window.confirm(`${what}?\n\nA new answer may be drafted; it replaces any draft still waiting for this lead. Nothing is sent without the usual delay or your approval.`)) return
     if ((await rerun(cat)) !== undefined) onChanged()
   }
 
@@ -62,14 +97,14 @@ function ReplyCard({ reply, onChanged }) {
 
       <div className="reply-actions">
         <label className="inline-select">
-          <span className="muted">Category</span>
+          <span className="muted">Wrong category?</span>
           <select
             value=""
             disabled={busy || reply.triage_status === 'processing'}
             onChange={(e) => e.target.value && change(e.target.value)}
             aria-label="Change category and re-run"
           >
-            <option value="">{category ? 'Change…' : 'Set…'}</option>
+            <option value="">{category ? 'Change it…' : 'Set it…'}</option>
             {CATEGORY_ORDER.map((c) => (
               <option key={c} value={c} disabled={c === category}>
                 {CATEGORIES[c][1]}
@@ -77,8 +112,9 @@ function ReplyCard({ reply, onChanged }) {
             ))}
           </select>
         </label>
-        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => change(null)}>
-          {busy ? <Spinner /> : null} Run triage again
+        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => change(null)}
+          title="The AI reads this reply again from scratch, e.g. after it failed or after you fixed the lead's details">
+          {busy ? <Spinner /> : null} {busy ? 'Reading again…' : 'Read again'}
         </button>
         {reply.gmail_link && (
           <a className="btn btn-sm" href={reply.gmail_link} target="_blank" rel="noreferrer">
@@ -103,7 +139,12 @@ export default function TriageReplies() {
     setReplies(r.events || [])
     setSchedule(h.schedule || {})
   })
-  const [{ busy: running, error: runError, result: runResult }, runNow] = useAction(() => api.run('triage'))
+  // Fetch new mail first, then sort it: what "check now" means to a person.
+  const [{ busy: running, error: runError, result: runResult }, runNow] = useAction(async () => {
+    const mail = (await api.run('poller')).result || {}
+    const sorted = (await api.run('triage')).result || {}
+    return { mail, sorted }
+  })
 
   const refresh = useCallback(() => load(), [load])
   useEffect(() => {
@@ -132,8 +173,9 @@ export default function TriageReplies() {
         </div>
         <div className="toolbar-actions">
           <ReplyCheckSchedule schedule={schedule} />
-          <button className="btn" onClick={() => runNow().then(refresh)} disabled={running}>
-            {running ? <Spinner /> : null} Triage now
+          <button className="btn" onClick={() => runNow().then(refresh)} disabled={running}
+            title="Fetch new mail from the inbox and sort it now, instead of waiting for the automatic check">
+            {running ? <Spinner /> : null} {running ? 'Checking…' : 'Check for replies now'}
           </button>
         </div>
       </div>
@@ -149,14 +191,7 @@ export default function TriageReplies() {
         <ErrorNote error={error?.status === 0 ? null : error} onRetry={load} />
       )}
       <ErrorNote error={runError} />
-      {runResult && (
-        <p className="muted">
-          Triage run:{' '}
-          {Object.keys(runResult.result || {}).length
-            ? Object.entries(runResult.result).map(([k, v]) => `${v} ${k.replace(/_/g, ' ')}`).join(' · ')
-            : 'nothing new'}
-        </p>
-      )}
+      {runResult && <CheckResult {...runResult} />}
 
       <div className="stats">
         <StatTile
