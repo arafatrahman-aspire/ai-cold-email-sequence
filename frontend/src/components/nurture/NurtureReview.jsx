@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api.js'
 import { EXIT_REASONS, MESSAGE_STATUS, NURTURE_PERSONAS, relativeTime, shortDateTime, TEMPERATURES } from '../../labels.js'
-import { AutoTextarea, Badge, Card, ErrorNote, Spinner, useAction } from '../ui.jsx'
+import { AutoTextarea, Badge, Card, ErrorNote, Spinner, useAction, useIsAdmin } from '../ui.jsx'
+import { LeadLink } from '../LeadJourney.jsx'
+import AiBanner from './AiBanner.jsx'
 
-function MessageCard({ m, onChanged, dev }) {
+function MessageCard({ m, onChanged, dev, canSend }) {
   const [subject, setSubject] = useState(m.subject || '')
   const [preheader, setPreheader] = useState(m.preheader || '')
   const [body, setBody] = useState(m.body || '')
@@ -54,7 +56,7 @@ function MessageCard({ m, onChanged, dev }) {
       <div className="reply-actions">
         <span className={m.status === 'needs_approval' ? 'auto-send waits' : 'auto-send'}>
           {dev
-            ? <>Dev mode: goes out only when you click Send now{m.status === 'needs_approval' ? ' (sending also approves it)' : ''}</>
+            ? <>Test environment: goes out only when an admin clicks Send now{m.status === 'needs_approval' ? ' (sending also approves it)' : ''}</>
             : m.status === 'needs_approval'
             ? <>Waits for your approval{new Date(m.send_at) < new Date() ? ' (its send time has passed)' : ''}: due {shortDateTime(m.send_at)}</>
             : new Date(m.send_at) <= new Date()
@@ -65,7 +67,7 @@ function MessageCard({ m, onChanged, dev }) {
           {dirty && <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { setSubject(m.subject || ''); setPreheader(m.preheader || ''); setBody(m.body || '') }}>Undo edits</button>}
           <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => act('reject')} title="It is written again (after two rejections the pre-approved text is used)">Reject</button>
           {dirty && <button className="btn btn-sm" disabled={busy} onClick={() => act('save')}>Save edits</button>}
-          {dev && (
+          {dev && canSend && (
             <button className="btn btn-primary btn-sm" disabled={busy || !subject.trim() || !body.trim()} onClick={() => act('send')}
               title="APP_ENV=dev: send this email now, ignoring its scheduled time and the sending window">
               {busy ? <Spinner /> : null} {dirty ? 'Save & send now' : 'Send now'}
@@ -87,6 +89,7 @@ export default function NurtureReview() {
   const [messages, setMessages] = useState(null)
   const [mode, setMode] = useState(null)
   const [dev, setDev] = useState(false)
+  const admin = useIsAdmin()
   const [{ busy, error }, load] = useAction(async () => {
     const [r, s, st] = await Promise.all([api.nurtureReview(), api.nurtureSettings(), api.nurtureStatus()])
     setMessages(r.messages || [])
@@ -111,25 +114,42 @@ export default function NurtureReview() {
           <h1>Review queue</h1>
           <p className="muted">
             Emails written ahead of their send time.{' '}
-            {dev ? 'APP_ENV=dev: nothing is sent automatically; use Send now to test each email.' : `${modeText} Change this in Settings → Review.`}
+            {dev ? 'Test environment: nothing is sent automatically; an admin uses Send now to test each email.' : `${modeText} ${admin ? 'Change this in Settings → Review.' : 'An admin can change this.'}`}
           </p>
         </div>
         <button className="btn" onClick={() => load()} disabled={busy}>{busy ? <Spinner /> : null} Refresh</button>
       </div>
+      <AiBanner />
       <ErrorNote error={error} onRetry={load} />
       {messages && (
         <>
           <Card title={`Waiting for approval (${waiting.length})`}>
-            {waiting.length ? <ul className="replies">{waiting.map((m) => <MessageCard key={m.id} m={m} onChanged={load} dev={dev} />)}</ul>
+            {waiting.length ? <ul className="replies">{waiting.map((m) => <MessageCard key={m.id} m={m} onChanged={load} dev={dev} canSend={admin} />)}</ul>
               : <p className="muted">Nothing is waiting for you.</p>}
           </Card>
           <Card title={`Going out in the next 3 days (${upcoming.length})`}>
-            {upcoming.length ? <ul className="replies">{upcoming.map((m) => <MessageCard key={m.id} m={m} onChanged={load} dev={dev} />)}</ul>
+            {upcoming.length ? <ul className="replies">{upcoming.map((m) => <MessageCard key={m.id} m={m} onChanged={load} dev={dev} canSend={admin} />)}</ul>
               : <p className="muted">No emails scheduled in the next 3 days.</p>}
           </Card>
         </>
       )}
     </div>
+  )
+}
+
+function SendToSales({ h, onDone }) {
+  const [{ busy, error, result }, send] = useAction(async () => {
+    if (!window.confirm(`Email this hand-off (${h.email}) to sales again?`)) return null
+    const r = await api.nurtureSendToSales(h.id)
+    onDone()
+    return r
+  })
+  return (
+    <>
+      <button className="btn btn-sm" disabled={busy} onClick={() => send()}>{busy ? <Spinner /> : null} Send to sales</button>
+      {result?.to && <span className="muted">Sent to {result.to}</span>}
+      <ErrorNote error={error} />
+    </>
   )
 }
 
@@ -158,7 +178,7 @@ export function NurtureHandoffs() {
                 <li key={h.id} className="reply">
                   <div className="reply-head">
                     <div className="reply-who">
-                      <strong>{[h.first_name, h.last_name].filter(Boolean).join(' ') || h.email}</strong>
+                      <strong><LeadLink leadId={h.lead_id}>{[h.first_name, h.last_name].filter(Boolean).join(' ') || h.email}</LeadLink></strong>
                       <span className="muted">{[h.email, h.job_title, h.company].filter(Boolean).join(' · ')}</span>
                     </div>
                     <div className="reply-meta">
@@ -169,10 +189,19 @@ export function NurtureHandoffs() {
                   <p className="muted">
                     {NURTURE_PERSONAS[h.persona]} · {TEMPERATURES[h.temperature]} track · {h.step} of 6 emails received
                   </p>
+                  {h.signals?.length > 0 && (
+                    <div className="did">
+                      <span className="did-title">Why they are ready</span>
+                      <ul>{h.signals.map((s) => <li key={s}>{s}</li>)}</ul>
+                    </div>
+                  )}
                   {h.summary ? <p>{h.summary}</p> : <p className="muted">Summary is being written…</p>}
-                  <p className="muted">
-                    {h.sales_notified_at ? `Sales notified ${relativeTime(h.sales_notified_at)}` : 'Notifying sales…'}
-                  </p>
+                  <div className="reply-actions">
+                    <span className="muted">
+                      {h.sales_notified_at ? `Sales notified ${relativeTime(h.sales_notified_at)}` : 'Notifying sales…'}
+                    </span>
+                    <div className="draft-buttons"><SendToSales h={h} onDone={load} /></div>
+                  </div>
                 </li>
               ))}
             </ul>

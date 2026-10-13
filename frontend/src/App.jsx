@@ -1,21 +1,25 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, setCsrfToken } from './api.js'
+import LeadJourney from './components/LeadJourney.jsx'
+import Campaigns from './components/Campaigns.jsx'
 import Dashboard from './components/Dashboard.jsx'
 import Enroll from './components/Enroll.jsx'
 import Preview from './components/Preview.jsx'
 import Settings from './components/Settings.jsx'
 import Tools from './components/Tools.jsx'
 import NurtureContent from './components/nurture/NurtureContent.jsx'
+import NurtureCalendar from './components/nurture/NurtureCalendar.jsx'
 import NurtureDashboard from './components/nurture/NurtureDashboard.jsx'
 import NurtureLeads from './components/nurture/NurtureLeads.jsx'
 import NurtureReview, { NurtureHandoffs } from './components/nurture/NurtureReview.jsx'
 import NurtureSettings from './components/nurture/NurtureSettings.jsx'
 import Accuracy from './components/triage/Accuracy.jsx'
+import AnswerLibrary from './components/triage/AnswerLibrary.jsx'
 import Drafts from './components/triage/Drafts.jsx'
 import { FollowUps, Meetings } from './components/triage/Meetings.jsx'
 import TriageReplies from './components/triage/TriageReplies.jsx'
 import TriageSettings from './components/triage/TriageSettings.jsx'
-import { Badge } from './components/ui.jsx'
+import { Badge, UserContext, isAdminUser } from './components/ui.jsx'
 
 // Three workspaces in one console: OUT-01 (sending the cold sequence), OUT-05
 // (handling the replies) and Email Nurture. The hash holds both parts:
@@ -25,10 +29,11 @@ const WORKSPACES = {
     label: 'Cold sequence',
     tabs: [
       ['overview', 'Overview'],
+      ['campaigns', 'Campaigns'],
       ['enroll', 'Enroll'],
-      ['preview', 'Preview'],
-      ['settings', 'Settings'],
-      ['tools', 'Tools'],
+      ['preview', 'Preview', 'admin'],
+      ['settings', 'Settings', 'admin'],
+      ['tools', 'Tools', 'admin'],
     ],
   },
   triage: {
@@ -38,8 +43,9 @@ const WORKSPACES = {
       ['drafts', 'Drafts'],
       ['meetings', 'Meetings'],
       ['follow-ups', 'Follow-ups'],
-      ['accuracy', 'Accuracy'],
-      ['settings', 'Settings'],
+      ['library', 'Answer library'],
+      ['accuracy', 'Accuracy', 'admin'],
+      ['settings', 'Settings', 'admin'],
     ],
   },
   nurture: {
@@ -48,25 +54,31 @@ const WORKSPACES = {
       ['dashboard', 'Dashboard'],
       ['leads', 'Leads'],
       ['review', 'Review'],
+      ['calendar', 'Calendar'],
       ['handoffs', 'Hand-offs'],
       ['content', 'Content'],
-      ['settings', 'Settings'],
+      ['settings', 'Settings', 'admin'],
     ],
   },
 }
 
 const THEME_KEY = 'outreach.theme'
 
-function readHash() {
+// Tabs this user may open: admin-only ones are hidden from everyone else.
+const tabsFor = (workspace, admin) => WORKSPACES[workspace].tabs.filter(([, , only]) => admin || only !== 'admin')
+
+function readHash(admin) {
   const hash = window.location.hash.replace('#', '')
   // The old #replies link now lives in the triage workspace.
   if (hash === 'replies') return { workspace: 'triage', tab: 'replies' }
   const [first, second] = hash.split('/')
+  // One lead's journey: #lead/<uuid>. Not a tab; reached from any lead.
+  if (first === 'lead' && /^[0-9a-f-]{36}$/i.test(second || '')) return { workspace: 'lead', tab: second }
   if (first === 'triage' || first === 'nurture') {
-    const tabs = WORKSPACES[first].tabs
+    const tabs = tabsFor(first, admin)
     return { workspace: first, tab: tabs.some(([t]) => t === second) ? second : tabs[0][0] }
   }
-  const tabs = WORKSPACES.sequence.tabs
+  const tabs = tabsFor('sequence', admin)
   return { workspace: 'sequence', tab: tabs.some(([t]) => t === first) ? first : 'overview' }
 }
 
@@ -190,16 +202,18 @@ export default function App() {
 }
 
 function Console({ user, onLogout }) {
-  const [{ workspace, tab }, setRoute] = useState(readHash)
+  const admin = isAdminUser(user)
+  const [{ workspace, tab }, setRoute] = useState(() => readHash(admin))
   const [theme, setTheme] = useState(readTheme)
   const [health, setHealth] = useState(null)
   const [healthError, setHealthError] = useState(null)
 
   useEffect(() => {
-    const onHash = () => setRoute(readHash())
+    const onHash = () => setRoute(readHash(admin))
+    onHash() // the role can change while signed in (CMS re-checks it)
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
-  }, [])
+  }, [admin])
 
   useEffect(() => {
     const root = document.documentElement
@@ -228,6 +242,7 @@ function Console({ user, onLogout }) {
   const nextTheme = { system: 'light', light: 'dark', dark: 'system' }[theme]
 
   return (
+    <UserContext.Provider value={user}>
     <div className="app">
       <header className="topbar">
         <div className="topbar-inner">
@@ -275,7 +290,7 @@ function Console({ user, onLogout }) {
         </div>
         <nav className="tabs" aria-label="Sections">
           <div className="tabs-inner">
-            {WORKSPACES[workspace].tabs.map(([id, label]) => (
+            {workspace !== 'lead' && tabsFor(workspace, admin).map(([id, label]) => (
               <a key={id} href={hrefFor(workspace, id)} className={`tab ${tab === id ? 'is-active' : ''}`} aria-current={tab === id ? 'page' : undefined}>
                 {label}
               </a>
@@ -302,9 +317,11 @@ function Console({ user, onLogout }) {
             </button>
           </div>
         )}
+        {workspace === 'lead' && <LeadJourney leadId={tab} />}
         {workspace === 'sequence' && (
           <>
             {tab === 'overview' && <Dashboard health={health} onRefreshHealth={refreshHealth} />}
+            {tab === 'campaigns' && <Campaigns />}
             {tab === 'enroll' && <Enroll />}
             {tab === 'preview' && <Preview />}
             {tab === 'settings' && <Settings />}
@@ -317,6 +334,7 @@ function Console({ user, onLogout }) {
             {tab === 'drafts' && <Drafts />}
             {tab === 'meetings' && <Meetings />}
             {tab === 'follow-ups' && <FollowUps />}
+            {tab === 'library' && <AnswerLibrary />}
             {tab === 'accuracy' && <Accuracy />}
             {tab === 'settings' && <TriageSettings />}
           </>
@@ -326,6 +344,7 @@ function Console({ user, onLogout }) {
             {tab === 'dashboard' && <NurtureDashboard />}
             {tab === 'leads' && <NurtureLeads />}
             {tab === 'review' && <NurtureReview />}
+            {tab === 'calendar' && <NurtureCalendar />}
             {tab === 'handoffs' && <NurtureHandoffs />}
             {tab === 'content' && <NurtureContent />}
             {tab === 'settings' && <NurtureSettings />}
@@ -333,5 +352,6 @@ function Console({ user, onLogout }) {
         )}
       </main>
     </div>
+    </UserContext.Provider>
   )
 }

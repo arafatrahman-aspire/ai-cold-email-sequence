@@ -48,6 +48,9 @@ DEFAULTS: dict[str, Any] = {
         "context_messages": 4,
         "meeting": {"slots_to_offer": 2, "days_ahead": 7, "min_notice_hours": 12},
     },
+    # Reply triage's answer library: [{"id", "title", "text"}], written by
+    # marketing; the AI reuses this wording when a reply asks the same thing.
+    "triage_snippets": [],
     # Email Nurture: stored overrides only; defaults in app.nurture.options
     # and app.nurture.content.
     "nurture": {},
@@ -137,6 +140,15 @@ async def step_gaps() -> list[int]:
 
 async def contactable_statuses() -> list[str]:
     return [str(x) for x in await get("contactable_lead_statuses")]
+
+
+async def triage_snippets() -> list[dict[str, Any]]:
+    """The answer library; never fails (an empty library changes nothing)."""
+    try:
+        value = await get("triage_snippets")
+    except Exception:
+        return []
+    return [s for s in (value or []) if isinstance(s, dict) and s.get("title") and s.get("text")]
 
 
 async def triage_config() -> dict[str, Any]:

@@ -5,6 +5,7 @@ import {
   relativeTime, shortDateTime, TEMPERATURES,
 } from '../../labels.js'
 import { Badge, Card, ErrorNote, Spinner, useAction } from '../ui.jsx'
+import { LeadLink } from '../LeadJourney.jsx'
 
 const name = (e) => [e.first_name, e.last_name].filter(Boolean).join(' ') || e.email
 const live = (s) => ['active', 'paused', 'held'].includes(s)
@@ -357,7 +358,7 @@ export default function NurtureLeads() {
                           aria-label={`Select ${name(l)}`} />
                       )}
                     </td>
-                    <td><strong>{[l.first_name, l.last_name].filter(Boolean).join(' ') || '—'}</strong><div className="muted">{l.email || 'No email'}</div></td>
+                    <td><strong><LeadLink leadId={l.lead_id}>{[l.first_name, l.last_name].filter(Boolean).join(' ') || '—'}</LeadLink></strong><div className="muted">{l.email || 'No email'}</div></td>
                     <td>{l.job_title || <span className="muted">No job title</span>}<div className="muted">{l.company || 'No company'}</div></td>
                     <td>{l.tier || <span className="muted">—</span>}<div className="muted">{l.lead_status}</div></td>
                     <td><NurtureState lead={l} /></td>

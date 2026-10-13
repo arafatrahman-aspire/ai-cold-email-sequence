@@ -540,3 +540,63 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .lead-emails .drafts { list-style: none; margin: 0; padding: 0; }
 .lead-emails .reply-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .email-body { white-space: pre-wrap; }
+
+/* One lead's journey */
+.journey { list-style: none; margin: 0; padding: 0; }
+.journey-item { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--grid); }
+.journey-item:last-child { border-bottom: 0; }
+.journey-when { display: flex; flex-direction: column; font-size: 13px; }
+.journey-what { min-width: 0; border-left: 3px solid var(--border); padding-left: 12px; }
+.journey-in .journey-what { border-left-color: var(--accent); }
+.journey-event .journey-what { border-left-style: dashed; }
+.journey-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.journey-subject { margin-top: 2px; }
+.journey-toggle { margin-top: 4px; padding-left: 0; }
+.journey-body { margin-top: 6px; padding: 10px 12px; background: var(--surface-2, transparent); border: 1px solid var(--border); border-radius: 8px; }
+@media (max-width: 640px) { .journey-item { grid-template-columns: 1fr; gap: 4px; } }
+
+/* Reply card: answer, times, conversation */
+.card-answer { list-style: none; margin: 10px 0 0; padding: 0; }
+.card-answer .draft { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+.draft-compact { grid-template-columns: 1fr; }
+.snippet-pick { margin-top: 6px; max-width: 320px; }
+.times { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+.times-group { display: flex; flex-direction: column; gap: 6px; }
+.times-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.times-tz { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.times-tz input { max-width: 220px; }
+.thread { list-style: none; margin: 10px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.thread li { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); max-width: 92%; }
+.thread-ours { align-self: flex-end; }
+.thread-theirs { align-self: flex-start; border-left: 3px solid var(--accent) !important; }
+.thread-head { display: flex; justify-content: space-between; gap: 12px; }
+
+/* Nurture calendar */
+.cal-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+.cal-day { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); min-height: 120px; }
+.cal-day.is-today { border-color: var(--accent); }
+.cal-day-head { display: flex; justify-content: space-between; }
+.cal-empty { text-align: center; }
+.cal-item { display: flex; flex-direction: column; gap: 2px; padding: 6px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 8%, transparent); font-size: 13px; overflow-wrap: anywhere; }
+.cal-item.is-planned { background: transparent; border: 1px dashed var(--border); }
+.cal-item-head { display: flex; justify-content: space-between; align-items: center; gap: 4px; }
+.cal-subject { font-style: italic; }
+@media (max-width: 900px) { .cal-week { grid-template-columns: 1fr; } .cal-day { min-height: 0; } }
+
+/* Nurture journey preview */
+.preview-steps { list-style: none; margin: 0; padding: 0; }
+.preview-step { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--grid); }
+.preview-step:last-child { border-bottom: 0; }
+.preview-day { display: flex; flex-direction: column; }
+.preview-what p { margin: 0 0 4px; }
+@media (max-width: 640px) { .preview-step { grid-template-columns: 1fr; gap: 4px; } }
+
+/* Campaigns */
+.campaign-numbers { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 8px 0; }
+.campaign-form { display: flex; flex-direction: column; gap: 12px; }
+.campaign-form h3 { margin: 10px 0 0; font-size: 15px; }
+.campaign-form p { margin: 0; }
+.campaign-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.campaign-preview { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; }
+@media (max-width: 760px) { .campaign-row { grid-template-columns: 1fr; } }
+.campaign-toggle { display: flex; align-items: center; gap: 10px; }

@@ -13,7 +13,7 @@ Only once all five pass does anything leave the building.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app import repository as repo
 from app import settings_store
@@ -193,6 +193,18 @@ async def _run(claim, *, respect_hours: bool) -> dict[str, int]:
             log.info("step %s skipped: %s is suppressed", step_id, lead["email"])
             await repo.cancel_sequence(lead["id"], "unsubscribed", "suppressed")
             stats["skipped"] += 1
+            continue
+
+        # A paused (or not yet started) campaign holds its emails; an ended
+        # one stops its sequences. General leads (no campaign) send as before.
+        campaign = await repo.campaign_for_lead(lead["id"])
+        if campaign and campaign.get("status") != "active":
+            if campaign.get("status") == "ended":
+                await repo.remove_from_sequence(lead["id"], f'campaign "{campaign.get("name")}" ended')
+                stats["skipped"] += 1
+            else:
+                await repo.defer_step(step_id, now + timedelta(hours=1))
+                stats["deferred_campaign"] = stats.get("deferred_campaign", 0) + 1
             continue
 
         hours = await settings_store.business_hours(lead.get("timezone"))

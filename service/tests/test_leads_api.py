@@ -103,3 +103,62 @@ def test_send_now_is_refused_in_production(client, monkeypatch):
     monkeypatch.setattr(get_settings(), "app_env", "production")
     r = c.post("/nurture/messages/00000000-0000-0000-0000-000000000001/send-now")
     assert r.status_code == 403 and "APP_ENV=dev" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("role,allowed", [("marketing", False), (None, False), ("admin", True), ("superadmin", True)])
+def test_configuration_is_admin_only(client, monkeypatch, role, allowed):
+    """Marketing uses the console but cannot change settings or run dev tools."""
+    c, _ = client
+    saved = []
+
+    async def set_value(key, value, description=None):
+        saved.append(key)
+
+    monkeypatch.setattr(settings_store, "set_value", set_value)
+    main.app.dependency_overrides[main.require_user] = lambda: {"email": "x@aspire.com", "role": role}
+
+    r = c.put("/settings/daily_cap", json={"value": 5})
+    assert (r.status_code == 200) is allowed and saved == (["daily_cap"] if allowed else [])
+    if not allowed:
+        assert r.json()["detail"] == "admin_only"
+        assert c.put("/nurture/settings", json={"paused": True}).status_code == 403
+        assert c.post("/nurture/run/send").status_code == 403
+        assert c.post("/send-now").status_code == 403
+        # Everyday work stays open.
+        assert c.get("/leads").status_code == 200
+
+
+def test_superadmin_can_sign_in():
+    from app.auth import ROLES, is_admin
+
+    assert {"admin", "superadmin", "marketing"} <= ROLES
+    assert is_admin({"role": "superadmin"}) and not is_admin({"role": "marketing"})
+
+
+def test_campaign_routes_reach_the_right_handler(client, monkeypatch):
+    """/enroll and /preview are not swallowed by /campaigns/{id}/{action}."""
+    c, _ = client
+    cid = "00000000-0000-0000-0000-0000000000c1"
+    calls = []
+
+    async def campaign_get(i):
+        return {"id": i, "name": "Q4", "status": "active", "audience": {}, "playbook": {}}
+
+    async def campaign_enroll(campaign_id, ref, contactable, skip):
+        calls.append(("enroll", ref))
+        return "enrolled", ref
+
+    async def campaign_set_status(i, status):
+        calls.append(("status", status))
+        return 0
+
+    monkeypatch.setattr(repo, "campaign_get", campaign_get)
+    monkeypatch.setattr(repo, "campaign_enroll", campaign_enroll)
+    monkeypatch.setattr(repo, "campaign_set_status", campaign_set_status)
+
+    lead = "00000000-0000-0000-0000-000000000001"
+    r = c.post(f"/campaigns/{cid}/enroll", json={"lead_ids": [lead]})
+    assert r.status_code == 200 and r.json()["enrolled"] == 1
+    assert c.post(f"/campaigns/{cid}/pause").status_code == 200
+    assert c.post(f"/campaigns/{cid}/explode").status_code == 404
+    assert calls == [("enroll", lead), ("status", "paused")]

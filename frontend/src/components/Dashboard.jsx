@@ -7,7 +7,7 @@ import {
   formatNumber,
 } from '../labels.js'
 import NeedsAttention from './NeedsAttention.jsx'
-import { Badge, Card, ErrorNote, ReplyCheckSchedule, Spinner, useAction } from './ui.jsx'
+import { Badge, Card, ErrorNote, ReplyCheckSchedule, Spinner, useAction, useIsAdmin } from './ui.jsx'
 
 const REFRESH_MS = 30_000
 
@@ -115,6 +115,9 @@ function JobResult({ label, result }) {
 }
 
 function RunJobs({ onDone, dryRun, schedule }) {
+  // Sending outside the schedule is for admins; drafting and checking are for everyone.
+  const admin = useIsAdmin()
+  const jobs = admin ? JOBS : JOBS.filter(([job]) => job !== 'sender')
   const [running, setRunning] = useState(null)
   const [last, setLast] = useState(null)
   const [confirming, setConfirming] = useState(false)
@@ -136,7 +139,7 @@ function RunJobs({ onDone, dryRun, schedule }) {
   return (
     <Card title="Run now" subtitle="These also run on their own in the background." actions={<ReplyCheckSchedule schedule={schedule} />}>
       <div className="jobs">
-        {JOBS.map(([job, label, hint, call]) => (
+        {jobs.map(([job, label, hint, call]) => (
           <button
             key={job}
             className="job"
@@ -150,20 +153,22 @@ function RunJobs({ onDone, dryRun, schedule }) {
             <span className="job-hint">{hint}</span>
           </button>
         ))}
-        <button
-          className="job job-accent"
-          disabled={running !== null}
-          onClick={() => setConfirming(true)}
-          aria-expanded={confirming}
-        >
-          <span className="job-title">
-            {running === SEND_NOW[0] ? <Spinner /> : null}
-            {SEND_NOW[1]}
-          </span>
-          <span className="job-hint">{SEND_NOW[2]}</span>
-        </button>
+        {admin && (
+          <button
+            className="job job-accent"
+            disabled={running !== null}
+            onClick={() => setConfirming(true)}
+            aria-expanded={confirming}
+          >
+            <span className="job-title">
+              {running === SEND_NOW[0] ? <Spinner /> : null}
+              {SEND_NOW[1]}
+            </span>
+            <span className="job-hint">{SEND_NOW[2]}</span>
+          </button>
+        )}
       </div>
-      {confirming && (
+      {admin && confirming && (
         <div className="note note-warning confirm">
           <Badge tone="warning">Confirm</Badge>
           <span>

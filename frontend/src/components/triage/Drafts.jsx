@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../../api.js'
 import { CATEGORIES, DRAFT_KINDS, relativeTime, shortDateTime } from '../../labels.js'
 import { AutoTextarea, Badge, Card, ErrorNote, Spinner, useAction } from '../ui.jsx'
+import { LeadLink } from '../LeadJourney.jsx'
 
 const FILTERS = [
   ['pending,approved,failed', 'Waiting'],
@@ -46,7 +47,21 @@ function SendInfo({ draft, now }) {
   return <span className="auto-send waits">Waits for your approval: it will not send on its own</span>
 }
 
-function DraftCard({ draft, now, onChanged }) {
+// The answer library, loaded once per page view: inserting approved wording
+// while editing an answer.
+let snippetCache = null
+export const forgetSnippets = () => { snippetCache = null }
+function useSnippets() {
+  const [snippets, setSnippets] = useState(snippetCache || [])
+  useEffect(() => {
+    if (snippetCache) return
+    api.snippets().then((r) => { snippetCache = r.snippets || []; setSnippets(snippetCache) }).catch(() => {})
+  }, [])
+  return snippets
+}
+
+export function DraftCard({ draft, now, onChanged, compact = false }) {
+  const snippets = useSnippets()
   const editable = ['pending', 'failed'].includes(draft.status)
   const [subject, setSubject] = useState(draft.subject)
   const [body, setBody] = useState(draft.body)
@@ -71,9 +86,9 @@ function DraftCard({ draft, now, onChanged }) {
 
   return (
     <li className="draft">
-      <div className="reply-head">
+      {!compact && <div className="reply-head">
         <div className="reply-who">
-          <strong>To {draft.to_email}</strong>
+          <strong>To <LeadLink leadId={draft.lead_id}>{draft.to_email}</LeadLink></strong>
           <span className="muted">{[draft.job_title, draft.company].filter(Boolean).join(' · ') || ' '}</span>
         </div>
         <div className="reply-meta">
@@ -83,20 +98,36 @@ function DraftCard({ draft, now, onChanged }) {
           </span>
           <span className="muted">{DRAFT_KINDS[draft.kind] || draft.kind}</span>
         </div>
-      </div>
+      </div>}
+      {compact && (
+        <div className="reply-head">
+          <span className="did-title">Our answer: {DRAFT_KINDS[draft.kind] || draft.kind}</span>
+          <Badge tone={sTone}>{sLabel}</Badge>
+        </div>
+      )}
 
-      <div className="draft-grid">
-        <div className="draft-theirs">
+      <div className={compact ? 'draft-grid draft-compact' : 'draft-grid'}>
+        {!compact && <div className="draft-theirs">
           <span className="did-title">They wrote {relativeTime(draft.reply_received_at, now)}</span>
           <p className="reply-subject">{draft.reply_subject || '(no subject)'}</p>
           <p className="reply-snippet">{draft.reply_snippet}</p>
-        </div>
+        </div>}
         <div className="draft-ours">
           <span className="did-title">Our reply</span>
           {editable ? (
             <>
               <input aria-label="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
               <AutoTextarea aria-label="Reply" minRows={6} value={body} onChange={(e) => setBody(e.target.value)} />
+              {snippets.length > 0 && (
+                <select className="snippet-pick" value="" aria-label="Insert from the answer library"
+                  onChange={(e) => {
+                    const s = snippets.find((x) => x.id === e.target.value)
+                    if (s) setBody((b) => b.replace(/\s*$/, '') + '\n\n' + s.text)
+                  }}>
+                  <option value="">Insert from the answer library…</option>
+                  {snippets.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
+                </select>
+              )}
             </>
           ) : (
             <>

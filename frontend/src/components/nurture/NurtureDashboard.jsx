@@ -3,6 +3,7 @@ import { api } from '../../api.js'
 import { formatNumber, NURTURE_PERSONAS, TEMPERATURES } from '../../labels.js'
 import { StatTile } from '../Dashboard.jsx'
 import { Badge, Card, ErrorNote, Spinner, useAction } from '../ui.jsx'
+import AiBanner from './AiBanner.jsx'
 
 const RANGES = [
   [30, 'Last 30 days'],
@@ -148,6 +149,7 @@ export default function NurtureDashboard() {
         </div>
         <button className="btn" onClick={() => load()} disabled={busy}>{busy ? <Spinner /> : null} Refresh</button>
       </div>
+      <AiBanner />
 
       <NurtureStatus status={data?.status} />
       <ErrorNote error={error} onRetry={load} />

@@ -45,6 +45,11 @@ async def validate_node(state: SequenceState) -> SequenceState:
     if len(emails) != expected:
         errors.append(f"expected {expected} emails, got {len(emails)}")
 
+    # A campaign's banned claims (playbook) are checked like spam words.
+    banned = [str(b).strip().lower() for b in
+              (((state.get("lead") or {}).get("playbook") or {}).get("banned_claims") or [])
+              if str(b).strip()]
+
     seen_subjects: set[str] = set()
     for email in emails:
         n = email.get("step_number")
@@ -77,6 +82,10 @@ async def validate_node(state: SequenceState) -> SequenceState:
             errors.append(
                 f"email {n}: body is too long ({len(body)} chars, maximum {max_body})"
             )
+
+        said = [b for b in banned if b in f"{subject}\n{body}".lower()]
+        if said:
+            errors.append(f"email {n}: uses a claim the campaign bans: {', '.join(said)}")
 
         placeholder = _PLACEHOLDER.search(f"{subject}\n{body}")
         if placeholder:

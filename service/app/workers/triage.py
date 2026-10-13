@@ -281,6 +281,8 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
                 referral=referral_name,
                 snooze_days=int(cfg["not_now_days"]),
                 history=history_text,
+                examples=await repo.draft_examples(draft_kind),
+                snippets=await settings_store.triage_snippets(),
             ))
             auto = (not needs_human and draft_kind in cfg["auto_send_kinds"])
             refs = [r for r in (event.get("in_reply_to"), event.get("message_id")) if r]
@@ -390,3 +392,145 @@ async def run_once() -> dict[str, Any]:
     if stats:
         log.info("triage tick: %s", stats)
     return stats
+
+
+# ---------------------------------------------------------------------------
+# From a reply's card in the console: see the times, book one
+# ---------------------------------------------------------------------------
+
+class CardError(Exception):
+    """Something the person should read (not a crash)."""
+
+
+async def _event_and_lead(event_id: str) -> tuple[dict, dict]:
+    event = await repo.inbox_event(event_id)
+    if event is None:
+        raise CardError("this reply no longer exists")
+    if not event.get("lead_id"):
+        raise CardError("this reply is not linked to a cold-sequence lead")
+    lead = await repo.lead_for_step(str(event["lead_id"]))
+    if lead is None:
+        raise CardError("the lead is no longer enrolled")
+    return event, lead
+
+
+async def times_for_event(event_id: str, now: Optional[datetime] = None) -> dict[str, Any]:
+    """The times worth one click on a reply card: what we offered last, what
+    they proposed, and the next free times inside their business hours.
+    ``problem`` says in plain words why no time can be offered."""
+    now = now or datetime.now(timezone.utc)
+    event, lead = await _event_and_lead(event_id)
+    tz = lead.get("timezone") or "UTC"
+    hours = await settings_store.business_hours(tz)
+    ctx = await repo.triage_context(str(event["lead_id"]))
+    out: dict[str, Any] = {
+        "timezone": tz, "timezone_source": lead.get("timezone_source"),
+        "business_hours": f"{hours.start_hour}:00-{hours.end_hour}:00",
+        "has_meeting": bool(ctx.get("has_meeting")),
+        "offered": [], "proposed": None, "suggestions": [], "problem": None,
+    }
+    try:
+        calendar = get_calendar()
+    except CalendarError as exc:
+        out["problem"] = f"The calendar is not set up ({exc})"
+        return out
+    if calendar is None:
+        out["problem"] = "No calendar is connected (CALENDAR_PROVIDER=none)"
+        return out
+    meeting_cfg = (await settings_store.triage_config())["meeting"]
+    try:
+        free = await calendar.free_slots(now, now + timedelta(days=int(meeting_cfg["days_ahead"])))
+    except CalendarError as exc:
+        out["problem"] = f"The calendar could not be read ({exc})"
+        return out
+
+    def entry(slot: Slot) -> dict[str, Any]:
+        return {**slot.to_json(), "label": describe_slot(slot, tz),
+                "free": find_slot(free, slot.start) is not None}
+
+    earliest = now + timedelta(minutes=30)
+    out["offered"] = [entry(s) for s in (Slot.from_json(x) for x in ctx.get("offered_slots") or [])
+                      if s.start > earliest]
+    proposed = (event.get("extracted") or {}).get("proposed_time")
+    if proposed:
+        when = datetime.fromisoformat(proposed)
+        slot = find_slot(free, when)
+        out["proposed"] = (entry(slot) if slot else
+                           {"start": when.isoformat(), "label": describe_slot(Slot(when, when + timedelta(minutes=30)), tz),
+                            "free": False})
+    picked = pick_slots(free, tz, hours, now, 3, int(meeting_cfg["min_notice_hours"]))
+    out["suggestions"] = [entry(s) for s in picked]
+    if not free:
+        out["problem"] = f"The calendar has no free time in the next {meeting_cfg['days_ahead']} days"
+    elif not picked:
+        out["problem"] = (f"None of your free calendar time falls in this lead's business hours "
+                          f"({out['business_hours']} {tz}). Check the lead's timezone, or add hours "
+                          f"to your calendar that suit them.")
+    return out
+
+
+async def book_from_card(event_id: str, start: datetime, user: str,
+                         now: Optional[datetime] = None) -> dict[str, Any]:
+    """Book the meeting a person picked on a reply card, then write the
+    confirmation for the lead (it follows the usual send rules)."""
+    now = now or datetime.now(timezone.utc)
+    event, lead = await _event_and_lead(event_id)
+    lead_id = str(event["lead_id"])
+    if (await repo.triage_context(lead_id)).get("has_meeting"):
+        raise CardError("this lead already has a meeting booked")
+    try:
+        calendar = get_calendar()
+    except CalendarError as exc:
+        raise CardError(f"the calendar is not set up ({exc})")
+    if calendar is None:
+        raise CardError("no calendar is connected")
+    if start <= now + timedelta(minutes=30):
+        raise CardError("that time has passed or is too soon")
+    try:
+        free = await calendar.free_slots(start - timedelta(minutes=1), start + timedelta(minutes=1))
+    except CalendarError as exc:
+        raise CardError(f"the calendar could not be read ({exc})")
+    slot = find_slot(free, start)
+    if slot is None:
+        raise CardError("that time is no longer free in your calendar")
+
+    tz = lead.get("timezone") or "UTC"
+    reply_to = event.get("from_email") or lead.get("email")
+    try:
+        b = await calendar.book(slot.start, _attendee(lead, reply_to), f"Booked by {user} from the console")
+    except CalendarError as exc:
+        raise CardError("that time was just taken" if exc.slot_taken else f"booking failed ({exc})")
+    await repo.record_meeting(lead_id, event_id, b.provider, b.external_id, b.start, b.end, reply_to, b.meeting_url)
+    await repo.cancel_lead_drafts(lead_id, "meeting booked")
+    booked = describe_slot(Slot(b.start, b.end), tz)
+    log.info("meeting booked from the console by %s for reply %s: %s", user, event_id, booked)
+
+    # Tell the lead, like triage does after booking.
+    result: dict[str, Any] = {"booked": booked, "meeting_url": b.meeting_url, "draft_id": None}
+    inbox = next((i for i in await repo.active_inboxes() if i.id == str(event["inbox_id"])), None)
+    if inbox is None:
+        result["note"] = "Booked. The inbox that received the reply is not active, so no confirmation was written."
+        return result
+    cfg = await settings_store.triage_config()
+    hours = await settings_store.business_hours(tz)
+    raw = event.get("snippet") or ""
+    subject, body, _ = await write_draft(DraftInput(
+        kind="booking_confirmation",
+        first_name=lead.get("first_name"),
+        sign_off=(inbox.display_name or "").split()[0] if inbox.display_name else "",
+        reply_subject=event.get("subject") or "",
+        reply_body=strip_quoted(raw) or raw,
+        slot_lines=[],
+        booking_link=calendar.booking_link(),
+        booked=booked,
+        meeting_url=b.meeting_url,
+        examples=await repo.draft_examples("booking_confirmation"),
+    ))
+    auto = "booking_confirmation" in cfg["auto_send_kinds"]
+    refs = [r for r in (event.get("in_reply_to"), event.get("message_id")) if r]
+    result["draft_id"] = await repo.create_draft(
+        event_id, lead_id, str(event["inbox_id"]), "booking_confirmation", reply_to, subject, body,
+        [], event.get("message_id"), refs,
+        auto_send_time(now, int(cfg["auto_send_delay_minutes"]), tz, hours) if auto else None,
+    )
+    return result

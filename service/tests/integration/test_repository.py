@@ -133,6 +133,9 @@ create table if not exists public.email_nurture_state (
     lead_id text not null unique references public.leads(lead_id),
     email_journey_started_at timestamptz
 );
+-- Read by campaign audiences (0017).
+alter table public.prospects add column if not exists industry text;
+alter table public.company_profiles add column if not exists industry text;
 -- Read by Email Nurture (0010).
 alter table public.leads add column if not exists lead_score text default 'Warm';
 alter table public.leads add column if not exists payment_status text default 'none';
@@ -162,7 +165,7 @@ async def database():
         "truncate cold_email.meetings, cold_email.reply_drafts, cold_email.inbox_events,"
         " cold_email.emails, cold_email.enrollments, cold_email.contacts,"
         " cold_email.suppression_list, cold_email.inboxes,"
-        " cold_email.nurture_enrollments,"
+        " cold_email.nurture_enrollments, cold_email.campaigns,"
         " public.lead_scores,"
         " public.email_nurture_state, public.prospects, public.lead_profiles,"
         " public.company_profiles, public.leads restart identity cascade"
@@ -171,10 +174,11 @@ async def database():
     client = await db.connect()
     # Standalone PostgREST serves at the root; Supabase serves it at /rest/v1.
     client.base_url = REST_URL
-    # The migration notifies PostgREST to reload; wait until it has.
+    # The migration notifies PostgREST to reload; wait until it has (a
+    # function from the newest migration answers).
     for _ in range(50):
         try:
-            await db.rpc("ping")
+            await db.rpc("campaign_results")
             break
         except Exception:
             await asyncio.sleep(0.2)
@@ -780,3 +784,149 @@ async def test_view_and_edit_drafted_emails(database):
     assert await repo.edit_email(rows[0]["id"], "x", "y") is False
     assert await repo.remove_from_sequence(lead, "x") == "removed"
     assert await repo.edit_email(rows[3]["id"], "x", "y") is False
+
+
+@pytest.mark.anyio
+async def test_lead_journey_and_triage_card_tools(database):
+    """0014 (one lead's whole story) and 0015 (learning from edits, one reply,
+    correcting a timezone)."""
+    from app import repository as repo
+
+    pg = database
+    inbox_id = await _seed(pg)
+    assert (await repo.enroll_lead("L-1", CONTACTABLE, True))[0] == "enrolled"
+    lead = str(await pg.fetchval("select id from public.leads where lead_id='L-1'"))
+    now = datetime.now(timezone.utc)
+    emails = [{"step_number": i, "subject": f"s{i}", "body": f"b{i}"} for i in (1, 2)]
+    await repo.store_sequence(lead, "ciso", "keyword", "g", "m", emails, [now - timedelta(days=1), now + timedelta(days=3)])
+    await pg.execute("update cold_email.emails set status='sent', sent_at=now() - interval '1 day'"
+                     " where lead_id=$1::uuid and step_number=1", lead)
+    await repo.record_inbox_event(inbox_id, lead, "reply", "ciso@example.com", "o@x",
+                                  "Re: s1", "<r1@x>", None, "Tell me more", now)
+    [ev] = await repo.list_inbox_events(["reply"], 5)
+    draft = await repo.create_draft(ev["id"], lead, inbox_id, "meeting_offer", "ciso@example.com",
+                                    "Re: s1", "AI text", [], "<r1@x>", ["<r1@x>"], None)
+
+    # One reply by id, for booking from its card.
+    one = await repo.inbox_event(ev["id"])
+    assert (one["lead_id"], one["inbox_id"], one["message_id"]) == (lead, inbox_id, "<r1@x>")
+    assert await repo.inbox_event("00000000-0000-0000-0000-000000000000") is None
+
+    # Editing keeps the AI's original once; the edited, sent answer becomes an example.
+    assert await repo.edit_draft(draft, "Re: s1", "Our edit", "me@x") is True
+    assert await repo.edit_draft(draft, "Re: s1", "Our second edit", "you@x") is True
+    row = await pg.fetchrow("select ai_body, edited_by from cold_email.draft_edits where draft_id=$1::uuid", draft)
+    assert (row["ai_body"], row["edited_by"]) == ("AI text", "you@x")
+    assert await repo.draft_examples("meeting_offer") == []          # not sent yet
+    await repo.finish_draft(draft, "sent", "<ours@x>")
+    assert await repo.draft_examples("meeting_offer") == [{"subject": "Re: s1", "body": "Our second edit"}]
+    assert await repo.draft_examples("objection_reply") == []
+    assert await repo.edit_draft(draft, "x", "y", "me@x") is False   # sent: too late
+
+    # A meeting, then the whole journey.
+    await repo.record_meeting(lead, ev["id"], "fake", "b-1", now + timedelta(days=2),
+                              now + timedelta(days=2, minutes=30), "ciso@example.com", "https://meet/x")
+    journey = await repo.lead_journey(lead)
+    assert journey["lead"]["email"] == "ciso@example.com" and journey["cold"]["status"] == "meeting_booked"
+    types = [i["type"] for i in journey["items"]]
+    assert sorted(types) == sorted(["cold_sent", "cold_scheduled", "inbound", "answer", "meeting"])
+    assert types[0] == "cold_scheduled"            # newest first: the email still due in 3 days
+    inbound = next(i for i in journey["items"] if i["type"] == "inbound")
+    assert (inbound["source"], inbound["snippet"]) == ("cold", "Tell me more")
+    unknown = await repo.lead_journey("00000000-0000-0000-0000-000000000000")
+    assert unknown["lead"] is None and unknown["items"] == []
+
+    # Timezone: only for an enrolled lead, nothing else changes.
+    assert await repo.set_lead_timezone(lead, "Asia/Dhaka") is True
+    assert (await repo.lead_for_step(lead))["timezone"] == "Asia/Dhaka"
+    assert await repo.set_lead_timezone("00000000-0000-0000-0000-000000000000", "UTC") is False
+    assert await pg.fetchval("select status from cold_email.enrollments where lead_id=$1::uuid", lead) == "meeting_booked"
+
+
+@pytest.mark.anyio
+async def test_campaigns(database, monkeypatch):
+    """0017: audience, enrolling into a campaign, start / pause / end, results,
+    and the sender holding a paused campaign's emails."""
+    from app import repository as repo, settings_store
+    from app.config import get_settings
+    from app.workers import sender
+
+    pg = database
+    await _seed(pg)
+    await pg.execute("update public.prospects set industry='Healthcare', country='United States' where lead_id='L-1'")
+    await pg.execute("insert into public.prospects (lead_id, title, company_name, industry) "
+                     "values ('L-5', 'Chief Information Security Officer', 'Kim Co', 'Finance')")
+
+    cid = await repo.campaign_save(None, "Q4 healthcare", {"titles": ["CISO"], "industries": ["health"]},
+                                   {"angle": "HIPAA audits", "banned_claims": ["guaranteed"]}, False, "me@x")
+    c = await repo.campaign_get(cid)
+    assert (c["status"], c["playbook"]["angle"]) == ("draft", "HIPAA audits")
+
+    # Audience: title AND industry; enrolled, DNC and no-email leads are left out.
+    leads, total = await repo.campaign_audience(c["audience"], CONTACTABLE)
+    assert (total, [l["lead_ref"] for l in leads]) == (1, ["L-1"])
+    wide, _ = await repo.campaign_audience({"titles": ["chief information", "ciso"]}, CONTACTABLE)
+    assert sorted(l["lead_ref"] for l in wide) == ["L-1", "L-5"]
+
+    # Enrolling joins the campaign in the same step; General leads have none.
+    assert (await repo.campaign_enroll(cid, "L-1", CONTACTABLE, True))[0] == "enrolled"
+    assert (await repo.enroll_lead("L-5", CONTACTABLE, True))[0] == "enrolled"
+    l1 = str(await pg.fetchval("select id from public.leads where lead_id='L-1'"))
+    l5 = str(await pg.fetchval("select id from public.leads where lead_id='L-5'"))
+    assert (await repo.campaign_for_lead(l1))["name"] == "Q4 healthcare"
+    assert await repo.campaign_for_lead(l5) is None
+    assert (await repo.campaign_enroll(cid, "L-1", CONTACTABLE, True))[0] == "already_enrolled"
+    assert (await repo.campaign_audience(c["audience"], CONTACTABLE))[1] == 0
+
+    # A campaign not started holds its emails (not even claimed, so they never
+    # block anyone else); General sends.
+    monkeypatch.setattr(get_settings(), "dry_run", True)
+    monkeypatch.setattr(settings_store, "_cache", {}, raising=False)
+    now = datetime.now(timezone.utc)
+    for lead in (l1, l5):
+        await repo.store_sequence(lead, "ciso", "keyword", "g", "m",
+                                  [{"step_number": 1, "subject": "s1", "body": "b1"},
+                                   {"step_number": 2, "subject": "s2", "body": "b2"}],
+                                  [now - timedelta(minutes=5), now + timedelta(days=3)])
+    stats = await sender.send_now()
+    assert (stats["sent"], stats.get("deferred_campaign")) == (1, None)
+    assert await repo.claim_due_steps(10) == []      # held, not merely deferred
+    status = lambda lead, step: pg.fetchval(  # noqa: E731
+        "select status from cold_email.emails where lead_id=$1::uuid and step_number=$2"
+        " order by version desc limit 1", lead, step)
+    assert await status(l5, 1) == "sent" and await status(l1, 1) == "pending"
+
+    # Start: the held emails move so the first is due now, keeping their spacing.
+    await pg.execute("update cold_email.emails set due_at = due_at - interval '2 days' where lead_id=$1::uuid", l1)
+    before = await pg.fetch("select step_number, due_at from cold_email.emails where lead_id=$1::uuid"
+                            " and status='pending' order by step_number", l1)
+    assert await repo.campaign_set_status(cid, "active") == 0
+    after = await pg.fetch("select step_number, due_at from cold_email.emails where lead_id=$1::uuid"
+                           " and status='pending' order by step_number", l1)
+    assert after[1]["due_at"] - after[0]["due_at"] == before[1]["due_at"] - before[0]["due_at"]
+    assert abs((after[0]["due_at"] - datetime.now(timezone.utc)).total_seconds()) < 60
+    # Pause is only for a running campaign.
+    assert (await repo.campaign_get(cid))["started_at"] is not None
+    assert (await sender.send_now())["sent"] == 1 and await status(l1, 1) == "sent"
+    assert await repo.campaign_set_status(cid, "paused") == 0
+    assert await repo.campaign_set_status(cid, "paused") == -1
+
+    # Results per campaign, General separately.
+    await repo.record_inbox_event(str(await pg.fetchval("select id from cold_email.inboxes limit 1")), l1,
+                                  "reply", "ciso@example.com", "o@x", "Re: s1", "<r@x>", None, "yes", now)
+    await pg.execute("update cold_email.inbox_events set category='interested' where lead_id=$1::uuid", l1)
+    results = {str(r["campaign_id"]) if r["campaign_id"] else None: r for r in await repo.campaign_results()}
+    assert (results[cid]["leads"], results[cid]["emails_sent"], results[cid]["interested"]) == (1, 1, 1)
+    assert (results[None]["leads"], results[None]["emails_sent"], results[None]["replied"]) == (1, 1, 0)
+
+    # End: stops the campaign's sequences (not General's), and stays ended.
+    await pg.execute("update cold_email.enrollments set status='sequence_ready' where lead_id=$1::uuid", l1)
+    assert await repo.campaign_set_status(cid, "ended") == 1
+    assert await pg.fetchval("select status from cold_email.enrollments where lead_id=$1::uuid", l1) == "stopped"
+    assert await status(l1, 2) == "cancelled" and await status(l5, 2) == "pending"
+    assert await repo.campaign_set_status(cid, "active") == -1
+    assert await repo.campaign_save(cid, "renamed", {}, {}, False, "me@x") is None
+    assert (await repo.campaign_enroll(cid, "L-7", CONTACTABLE, True))[0] == "campaign_not_open"
+    # Names are unique (case-insensitive).
+    with pytest.raises(Exception):
+        await repo.campaign_save(None, "q4 HEALTHCARE", {}, {}, False, "me@x")

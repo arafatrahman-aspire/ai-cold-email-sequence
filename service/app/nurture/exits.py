@@ -124,6 +124,24 @@ def notification(detail: dict[str, Any], summary: str, console_url: str) -> tupl
     return f"Nurture hand-off: {who} ({facts['trigger']})", "\n".join(lines)
 
 
+async def send_to_sales(enrollment_id: str, cfg: dict[str, Any], who: str) -> str:
+    """Email a hand-off to sales again (one click on the Hand-offs page).
+    Returns the address it went to. Raises ValueError with a reason."""
+    detail = await nrepo.detail(enrollment_id) or {}
+    enrollment = detail.get("enrollment") or {}
+    if enrollment.get("status") != "handed_off":
+        raise ValueError("only a lead that was handed off can be sent to sales; use Hand off now first")
+    to = await alerts.recipient(cfg, "sales_email")
+    if not to:
+        raise ValueError("no sales email is set (Email Nurture -> Settings, or the reply alert email)")
+    summary = enrollment.get("handoff_summary") or await summarise(detail)
+    subject, body = notification(detail, summary, os.environ.get("APP_PUBLIC_URL", "").rstrip("/"))
+    await alerts.send_internal(to, subject, f"{body}\n\n(Sent again by {who}.)")
+    await nrepo.notified(enrollment_id, summary)
+    await nrepo.log(enrollment_id, "sent_to_sales", {"to": to, "by": who})
+    return to
+
+
 async def notify_pending(cfg: dict[str, Any]) -> int:
     """Email sales about new hand-offs (retried each cycle for 3 days)."""
     to = await alerts.recipient(cfg, "sales_email")

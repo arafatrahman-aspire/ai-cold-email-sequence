@@ -397,3 +397,81 @@ async def test_missing_history_function_falls_back(monkeypatch, db, calendar):
     monkeypatch.setattr(repo, "conversation_history", missing)
     llm(monkeypatch, category="not_now")
     assert await run() == "not_now"
+
+
+# --- acting from a reply's card (console) -------------------------------------
+
+@pytest.fixture
+def card(monkeypatch, db):
+    async def inbox_event(event_id):
+        return None if event_id == "missing" else {**event(), "extracted": db.get("extracted", {})}
+
+    async def active_inboxes():
+        return [INBOX]
+
+    async def draft_examples(kind, limit=3):
+        return []
+
+    monkeypatch.setattr(repo, "inbox_event", inbox_event)
+    monkeypatch.setattr(repo, "active_inboxes", active_inboxes)
+    monkeypatch.setattr(repo, "draft_examples", draft_examples)
+    return db
+
+
+@pytest.mark.anyio
+async def test_card_times_offer_free_slots_in_the_leads_hours(monkeypatch, card, calendar):
+    card["extracted"] = {"proposed_time": "2026-10-06T23:00:00+00:00"}  # outside every slot
+    out = await worker.times_for_event("ev-1", now=NOW)
+    assert out["problem"] is None and out["timezone"] == "UTC"
+    assert len(out["suggestions"]) == 3 and all(s["free"] for s in out["suggestions"])
+    assert out["proposed"]["free"] is False
+
+
+@pytest.mark.anyio
+async def test_card_times_explain_when_hours_do_not_overlap(monkeypatch, card, calendar):
+    # The calendar's slots are 10-16 UTC; a lead at UTC+14 has 9-17 = 19-03 UTC: no overlap.
+    card["lead"] = {**LEAD, "timezone": "Pacific/Kiritimati"}
+    out = await worker.times_for_event("ev-1", now=NOW)
+    assert out["suggestions"] == [] and "business hours" in out["problem"]
+
+
+@pytest.mark.anyio
+async def test_book_from_card_books_and_writes_the_confirmation(monkeypatch, card, calendar):
+    llm(monkeypatch, category="interested")
+    slot = (await worker.times_for_event("ev-1", now=NOW))["suggestions"][0]
+    start = datetime.fromisoformat(slot["start"])
+
+    out = await worker.book_from_card("ev-1", start, "me@aspire.com", now=NOW)
+
+    assert start in calendar.bookings
+    assert calls(card, "record_meeting") and calls(card, "cancel_lead_drafts")
+    [d] = card["drafts"]
+    assert d["kind"] == "booking_confirmation" and out["booked"] in d["body"]
+    assert d["auto_send_at"] is not None  # booking_confirmation is an auto-send kind
+
+    # The same time again, or with a meeting already booked: refused, nothing booked twice.
+    with pytest.raises(worker.CardError, match="no longer free"):
+        await worker.book_from_card("ev-1", start, "me@aspire.com", now=NOW)
+    card["context"] = {**card["context"], "has_meeting": True}
+    with pytest.raises(worker.CardError, match="already has a meeting"):
+        await worker.book_from_card("ev-1", start + timedelta(days=1), "me@aspire.com", now=NOW)
+    with pytest.raises(worker.CardError, match="no longer exists"):
+        await worker.book_from_card("missing", start, "me@aspire.com", now=NOW)
+    assert len(calendar.bookings) == 1
+
+
+@pytest.mark.anyio
+async def test_examples_and_answer_library_reach_the_writer(monkeypatch, db, calendar):
+    gateway = llm(monkeypatch, category="objection", objection="budget")
+
+    async def draft_examples(kind, limit=3):
+        return [{"subject": "Re: x", "body": "Totally fair. Many teams start small. Worth a chat?"}]
+
+    async def snippets():
+        return [{"id": "1", "title": "Pricing", "text": "Plans start at a per-seat price; I can share details."}]
+
+    monkeypatch.setattr(repo, "draft_examples", draft_examples)
+    monkeypatch.setattr(worker.settings_store, "triage_snippets", snippets)
+    await run(event("Too expensive for us right now"))
+    draft_prompt = gateway.prompts[-1]
+    assert "Many teams start small" in draft_prompt and "Plans start at a per-seat price" in draft_prompt

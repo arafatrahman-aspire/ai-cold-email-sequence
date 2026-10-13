@@ -72,6 +72,40 @@ The sequence has {step_count} emails with these distinct jobs:
 """
 
 
+def _lines(value) -> list[str]:
+    if isinstance(value, str):
+        value = [value]
+    return [str(v).strip() for v in (value or []) if str(v).strip()]
+
+
+def playbook_section(playbook: dict | None) -> str:
+    """The campaign's brief, written by marketing. Empty for General leads,
+    so their prompt is exactly what it was before campaigns."""
+    if not playbook:
+        return ""
+    parts = []
+    if (angle := str(playbook.get("angle") or "").strip()):
+        parts.append(f"Campaign angle (use this instead of the persona's primary angle): {angle}")
+    if points := _lines(playbook.get("value_points")):
+        parts.append("Points worth making (pick what fits each email; do not list them all):\n"
+                     + "\n".join(f"- {p}" for p in points))
+    if proof := _lines(playbook.get("proof")):
+        parts.append("Proof you may cite, exactly as written (nothing else counts as proof):\n"
+                     + "\n".join(f"- {p}" for p in proof))
+    if (offer := str(playbook.get("offer") or "").strip()):
+        parts.append(f"The offer (use it in the value-nudge email): {offer}")
+    if (cta := str(playbook.get("cta") or "").strip()):
+        parts.append(f"The one thing to ask for: {cta}")
+    if (tone := str(playbook.get("tone") or "").strip()):
+        parts.append(f"Tone: {tone}")
+    if banned := _lines(playbook.get("banned_claims")):
+        parts.append("Never say or imply any of these: " + "; ".join(banned))
+    if not parts:
+        return ""
+    return ("Campaign brief from our marketing team. Follow it within the hard rules "
+            "above; it never overrides them:\n" + "\n\n".join(parts) + "\n")
+
+
 def build_user_prompt(
     persona: str,
     lead: dict,
@@ -100,7 +134,7 @@ How to approach this reader:
 {spec["guidance"]}
 
 {SEQUENCE_SHAPE.format(step_count=step_count)}
-
+{playbook_section(lead.get("playbook"))}
 Address the reader by first name in email 1 only. Use "{company}" naturally at
 most once per email. Everything you know about this prospect is listed above —
 do not assert anything beyond it.

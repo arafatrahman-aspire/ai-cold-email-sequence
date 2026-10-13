@@ -211,5 +211,21 @@ async def handoff_list(limit: int = 100) -> list[dict[str, Any]]:
     return await db.rows("nurture_handoff_list", p_limit=limit)
 
 
+async def handoff_signals(limit: int = 100) -> list[dict[str, Any]]:
+    """Clicks and replies behind each hand-off (0016_nurture_tools.sql);
+    empty until 0016 is run, so the Hand-offs page keeps working."""
+    try:
+        return await db.rows("nurture_handoff_signals", p_limit=limit)
+    except db.DatabaseError as exc:
+        if "PGRST202" not in str(exc):
+            raise
+        return []
+
+
+async def schedule(start: datetime, end: datetime) -> dict[str, Any]:
+    """Emails written or sent in the range, and the active enrollments (0016)."""
+    return await db.rpc("nurture_schedule", p_from=start, p_to=end) or {}
+
+
 async def stats(start: datetime, end: datetime) -> dict[str, Any]:
     return await db.rpc("nurture_stats", p_from=start, p_to=end) or {}

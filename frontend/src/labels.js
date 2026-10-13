@@ -52,6 +52,7 @@ export const PERSONAS = {
 export function enrollOutcome(outcome) {
   if (outcome === 'enrolled') return ['good', 'Enrolled']
   if (outcome === 'already_enrolled') return ['neutral', 'Already enrolled']
+  if (outcome === 'campaign_not_open') return ['warning', 'Campaign has ended']
   if (outcome === 'not_found') return ['critical', 'Lead not found']
   if (outcome === 'no_email') return ['warning', 'No email address']
   if (outcome === 'suppressed') return ['warning', 'On suppression list']

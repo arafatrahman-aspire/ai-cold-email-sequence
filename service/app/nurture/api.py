@@ -24,10 +24,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
+from app.auth import is_admin
 from app import repository as repo
 from app.config import get_settings
 from app.llm.factory import get_gateway
-from app.nurture import checks, content, enroll, exits, jobs, options, replies, sending
+from app.nurture import checks, content, enroll, exits, jobs, options, replies, schedule, sending
 from app.nurture import repo as nrepo
 from app.nurture.options import PERSONAS, STEPS, TEMPERATURES
 from app.nurture.safety import DATA_RULE, clean, data_block
@@ -199,7 +200,8 @@ def _cost(ai: dict[str, Any], prices: dict[str, Any]) -> float:
     return round(total, 4)
 
 
-def console_router(require_user: Callable) -> APIRouter:
+def console_router(require_user: Callable, require_admin: Optional[Callable] = None) -> APIRouter:
+    require_admin = require_admin or require_user
     router = APIRouter(prefix="/nurture", tags=["nurture"], dependencies=[Depends(require_user)])
 
     # Status, dashboard, settings -------------------------------------------------
@@ -237,7 +239,7 @@ def console_router(require_user: Callable) -> APIRouter:
     async def get_settings_() -> dict:
         return {"settings": await options.load(fresh=True), "defaults": options.DEFAULTS}
 
-    @router.put("/settings")
+    @router.put("/settings", dependencies=[Depends(require_admin)])
     async def put_settings(changes: dict[str, Any]) -> dict:
         unknown = sorted(set(changes) - set(options.DEFAULTS))
         if unknown:
@@ -369,6 +371,8 @@ def console_router(require_user: Callable) -> APIRouter:
             # Testing only: production sends on schedule.
             if get_settings().app_env != "dev":
                 raise HTTPException(status_code=403, detail="Send now is only available when APP_ENV=dev")
+            if not is_admin(user):
+                raise HTTPException(status_code=403, detail="admin_only")
             outcome = await jobs.send_now(str(message_id))
             if outcome == "not_waiting":
                 raise HTTPException(status_code=409, detail="this email is not waiting to be sent")
@@ -383,7 +387,35 @@ def console_router(require_user: Callable) -> APIRouter:
 
     @router.get("/handoffs")
     async def handoffs(limit: int = 100) -> dict:
-        return {"handoffs": await nrepo.handoff_list(max(1, min(limit, 500)))}
+        n = max(1, min(limit, 500))
+        rows = await nrepo.handoff_list(n)
+        extra = {str(s["id"]): s for s in await nrepo.handoff_signals(n)}
+        library = await content.resources()
+        for h in rows:
+            s = extra.get(str(h["id"]))
+            h["lead_id"] = s.get("lead_id") if s else None
+            h["signals"] = schedule.signals(s, h.get("trigger"), library) if s else []
+        return {"handoffs": rows}
+
+    @router.post("/enrollments/{enrollment_id}/send-to-sales")
+    async def send_to_sales(enrollment_id: UUID, user: dict = Depends(require_user)) -> dict:
+        who = user.get("email") or "someone"
+        try:
+            to = await exits.send_to_sales(str(enrollment_id), await options.load(), who)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        return {"ok": True, "to": to}
+
+    @router.get("/schedule")
+    async def nurture_schedule(start: datetime, end: datetime) -> dict:
+        """Every nurture email due in the range (at most 62 days): written
+        ones, and planned ones whose date follows the cadence."""
+        if start.tzinfo is None or end.tzinfo is None:
+            raise HTTPException(status_code=422, detail="start and end need a timezone")
+        if not timedelta(0) < end - start <= timedelta(days=62):
+            raise HTTPException(status_code=422, detail="the range must be 1 to 62 days")
+        data = await nrepo.schedule(start, end)
+        return {"items": schedule.calendar(data, await options.load(), start, end)}
 
     # Content -------------------------------------------------------------------------
     @router.get("/content/briefs")
@@ -468,7 +500,7 @@ def console_router(require_user: Callable) -> APIRouter:
         return {"suggested": suggested, "errors": errors}
 
     # Running the jobs by hand ------------------------------------------------------
-    @router.post("/run/{job}")
+    @router.post("/run/{job}", dependencies=[Depends(require_admin)])
     async def run(job: str) -> dict:
         runners = {"score": enroll.score_tick, "reconcile": enroll.reconcile_tick,
                    "generate": jobs.generate_tick, "send": jobs.send_tick, "poll": replies.poll_tick}

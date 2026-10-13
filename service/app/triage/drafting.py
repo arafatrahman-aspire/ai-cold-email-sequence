@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from app.llm.factory import get_gateway
@@ -109,6 +109,12 @@ class DraftInput:
     snooze_days: int = 60
     # The earlier messages of the thread, already formatted (oldest first).
     history: Optional[str] = None
+    # Answers of this kind that people edited and then sent: their style is the
+    # house style. Optional; empty means the AI writes as before.
+    examples: list[dict] = field(default_factory=list)
+    # The answer library (Reply triage -> Answer library): approved wording the
+    # AI may reuse when the reply asks about the same thing.
+    snippets: list[dict] = field(default_factory=list)
 
 
 def reply_subject(subject: str) -> str:
@@ -211,6 +217,18 @@ def _prompt(d: DraftInput) -> str:
     ]
     if d.slot_lines:
         parts.append("Time options (copy exactly, one per line):\n" + "\n".join(d.slot_lines))
+    if d.snippets:
+        parts.append(
+            "Approved answers from our team. When their reply asks about the same thing, use this "
+            "wording (adapt it lightly to fit); otherwise ignore them:\n"
+            + "\n".join(f"- {s['title']}: {s['text']}" for s in d.snippets[:20])
+        )
+    if d.examples:
+        parts.append(
+            "Answers of this kind our team edited and sent. Match their tone, length and style. "
+            "Never copy their names, companies, dates or times:\n"
+            + "\n---\n".join(e["body"][:1200] for e in d.examples[:3])
+        )
     if d.history:
         parts.append("The conversation so far, oldest first:\n" + d.history)
     parts.append(f"Their new reply (the one you are answering):\nSubject: {d.reply_subject}\n{d.reply_body[:2000]}")

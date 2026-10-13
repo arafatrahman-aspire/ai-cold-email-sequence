@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api.js'
-import { CATEGORIES, CATEGORY_ORDER, TRIAGE_STATUS, formatNumber, relativeTime } from '../../labels.js'
+import { CATEGORIES, CATEGORY_ORDER, TRIAGE_STATUS, formatNumber, relativeTime, shortDateTime } from '../../labels.js'
 import { BarList, StatTile } from '../Dashboard.jsx'
 import { Badge, Card, ErrorNote, ReplyCheckSchedule, Spinner, useAction } from '../ui.jsx'
+import { LeadLink } from '../LeadJourney.jsx'
+import { DraftCard } from './Drafts.jsx'
 
 const FILTERS = [['all', 'All'], ['needs_human', 'Needs you'], ...CATEGORY_ORDER.map((c) => [c, CATEGORIES[c][1]])]
 
@@ -39,7 +41,103 @@ function CheckResult({ mail, sorted }) {
   )
 }
 
-function ReplyCard({ reply, onChanged }) {
+// The conversation with this lead, oldest first: what we sent, what they
+// wrote, what we answered.
+function Thread({ leadId }) {
+  const [items, setItems] = useState(null)
+  const [{ busy, error }, load] = useAction(async () => {
+    const j = await api.leadJourney(leadId)
+    setItems((j.items || []).filter((i) => ['cold_sent', 'inbound', 'answer', 'nurture_sent'].includes(i.type)
+      && (i.type !== 'answer' || ['sent', 'pending', 'approved'].includes(i.status))).reverse())
+  })
+  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!items) return busy ? <Spinner label="Loading the conversation…" /> : <ErrorNote error={error} onRetry={load} />
+  return (
+    <ol className="thread">
+      {items.map((i) => {
+        const ours = i.type !== 'inbound'
+        const who = ours
+          ? i.type === 'answer' ? `Our answer${i.status === 'sent' ? '' : ' (not sent yet)'}` : i.type === 'cold_sent' ? `Our email ${i.step}` : `Nurture email ${i.step}`
+          : i.event_type === 'reply' ? 'They replied' : i.event_type.replace('_', ' ')
+        return (
+          <li key={`${i.type}-${i.id}`} className={ours ? 'thread-ours' : 'thread-theirs'}>
+            <div className="thread-head"><strong>{who}</strong><span className="muted">{shortDateTime(i.at)}</span></div>
+            <div className="reply-subject">{i.subject}</div>
+            <div className="email-body">{ours ? i.body : i.snippet}</div>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+// Book a time in one click, see why none fit, and fix the lead's timezone.
+function Times({ reply, onBooked }) {
+  const [times, setTimes] = useState(null)
+  const [tz, setTz] = useState('')
+  const [notice, setNotice] = useState(null)
+  const [{ busy, error }, load] = useAction(async () => {
+    const t = await api.eventTimes(reply.id)
+    setTimes(t)
+    setTz(t.timezone || '')
+  })
+  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const [{ busy: acting, error: actError }, act] = useAction(async (what, slot) => {
+    if (what === 'tz') {
+      await api.setLeadTimezone(reply.lead_id, tz.trim())
+      await load()
+      return null
+    }
+    if (!window.confirm(`Book ${slot.label} with ${reply.from_email}?\n\nThe calendar invite goes out now, and a confirmation email is written for them.`)) return null
+    const r = await api.bookFromCard(reply.id, slot.start)
+    setNotice(`Booked ${r.booked}.${r.draft_id ? ' The confirmation for them is shown on this card (it follows the usual send rules).' : ''} ${r.note || ''}`)
+    onBooked()
+    return r
+  })
+  if (!times) return busy ? <Spinner label="Checking your calendar…" /> : <ErrorNote error={error} onRetry={load} />
+
+  const groups = [
+    ['What they proposed', times.proposed ? [times.proposed] : []],
+    ['What we offered', times.offered],
+    ['Next free times in their hours', times.suggestions],
+  ].filter(([, list]) => list.length)
+  return (
+    <div className="times">
+      {notice && <div className="note note-good" role="status"><Badge tone="good">Booked</Badge><span>{notice}</span></div>}
+      {times.has_meeting && !notice && <p className="muted">This lead already has a meeting booked (see Meetings).</p>}
+      {times.problem && <div className="note note-warning"><Badge tone="warning">No time fits</Badge><span>{times.problem}</span></div>}
+      {!times.has_meeting && !notice && groups.map(([title, list]) => (
+        <div key={title} className="times-group">
+          <span className="did-title">{title}</span>
+          <div className="times-buttons">
+            {list.map((s) => (
+              <button key={s.start} className={`btn btn-sm ${s.free ? 'btn-primary' : ''}`} disabled={acting || !s.free}
+                onClick={() => act('book', s)} title={s.free ? `Your time: ${shortDateTime(s.start)}` : 'Not free in your calendar'}>
+                {s.free ? 'Book ' : 'Busy: '}{s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      <div className="times-tz">
+        <label className="muted" htmlFor={`tz-${reply.id}`}>
+          Lead's timezone (their business hours: {times.business_hours})
+        </label>
+        <input id={`tz-${reply.id}`} value={tz} onChange={(e) => setTz(e.target.value)} placeholder="e.g. America/New_York" />
+        <button className="btn btn-sm" disabled={acting || !tz.trim() || tz.trim() === times.timezone} onClick={() => act('tz')}>
+          Save timezone
+        </button>
+      </div>
+      <ErrorNote error={actError} />
+    </div>
+  )
+}
+
+function ReplyCard({ reply, onChanged, draft, now }) {
+  const [open, setOpen] = useState(null) // 'times' | 'thread' | null
+  const toggle = (what) => setOpen((o) => (o === what ? null : what))
+  const cold = Boolean(reply.lead_id) && reply.event_type === 'reply'
+
   const category = reply.human_category || reply.category
   const [tone, label] = CATEGORIES[category] || ['neutral', 'Not classified']
   const [sTone, sLabel] = TRIAGE_STATUS[reply.triage_status] || ['neutral', reply.triage_status || '']
@@ -60,7 +158,7 @@ function ReplyCard({ reply, onChanged }) {
     <li className="reply triage-reply">
       <div className="reply-head">
         <div className="reply-who">
-          <strong>{reply.from_email}</strong>
+          <strong><LeadLink leadId={reply.lead_id}>{reply.from_email}</LeadLink></strong>
           <span className="muted">
             {reply.extracted?.source === 'nurture'
               ? <>Reply to an Email Nurture email · <a href="#nurture/leads">see Email Nurture → Leads</a></>
@@ -95,7 +193,22 @@ function ReplyCard({ reply, onChanged }) {
         </div>
       )}
 
+      {draft && <ul className="replies card-answer"><DraftCard draft={draft} now={now} onChanged={onChanged} compact /></ul>}
+
+      {open === 'times' && <Times reply={reply} onBooked={onChanged} />}
+      {open === 'thread' && <Thread leadId={reply.lead_id} />}
+
       <div className="reply-actions">
+        {cold && (
+          <button className="btn btn-sm" onClick={() => toggle('times')} aria-expanded={open === 'times'}>
+            {open === 'times' ? 'Hide times' : 'Book a time'}
+          </button>
+        )}
+        {reply.lead_id && (
+          <button className="btn btn-ghost btn-sm" onClick={() => toggle('thread')} aria-expanded={open === 'thread'}>
+            {open === 'thread' ? 'Hide conversation' : 'Conversation'}
+          </button>
+        )}
         <label className="inline-select">
           <span className="muted">Wrong category?</span>
           <select
@@ -132,11 +245,25 @@ export default function TriageReplies() {
   const [stats, setStats] = useState(null)
   const [schedule, setSchedule] = useState(null)
   const [replies, setReplies] = useState(null)
+  const [drafts, setDrafts] = useState({})
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [])
   const [{ busy, error }, load] = useAction(async () => {
     const cat = CATEGORY_ORDER.includes(filter) ? filter : null
-    const [s, r, h] = await Promise.all([api.triageStats(), api.triageEvents(cat), api.health()])
+    const [s, r, h, d] = await Promise.all([
+      api.triageStats(), api.triageEvents(cat), api.health(), api.drafts('all', 200).catch(() => ({ drafts: [] })),
+    ])
     setStats(s)
     setReplies(r.events || [])
+    // Each reply's newest answer, shown and handled right on its card.
+    const byEvent = {}
+    for (const x of d.drafts || []) {
+      if (!byEvent[x.event_id] || x.created_at > byEvent[x.event_id].created_at) byEvent[x.event_id] = x
+    }
+    setDrafts(byEvent)
     setSchedule(h.schedule || {})
   })
   // Fetch new mail first, then sort it: what "check now" means to a person.
@@ -226,7 +353,7 @@ export default function TriageReplies() {
           {shown.length ? (
             <ul className="replies">
               {shown.map((r) => (
-                <ReplyCard key={r.id} reply={r} onChanged={refresh} />
+                <ReplyCard key={r.id} reply={r} onChanged={refresh} draft={drafts[r.id]} now={now} />
               ))}
             </ul>
           ) : (

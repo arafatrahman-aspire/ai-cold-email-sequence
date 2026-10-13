@@ -3,6 +3,7 @@ import { api } from '../../api.js'
 import { formatNumber, relativeTime, shortDateTime } from '../../labels.js'
 import { StatTile } from '../Dashboard.jsx'
 import { Badge, Card, ErrorNote, Spinner, useAction } from '../ui.jsx'
+import { LeadLink } from '../LeadJourney.jsx'
 
 const SOURCE = {
   reply: 'From a reply',
@@ -24,8 +25,8 @@ function MeetingRow({ m }) {
         <div className="muted">{relativeTime(m.start_at)}</div>
       </td>
       <td>
-        {m.attendee_name ? <strong>{m.attendee_name}</strong> : null}
-        <div>{m.attendee_email || '—'}</div>
+        {m.attendee_name ? <strong><LeadLink leadId={m.lead_id}>{m.attendee_name}</LeadLink></strong> : null}
+        <div>{m.attendee_name ? m.attendee_email || '—' : <LeadLink leadId={m.lead_id}>{m.attendee_email || '—'}</LeadLink>}</div>
         <div className="muted">
           {m.lead_id
             ? [m.job_title, m.company].filter(Boolean).join(' · ') || 'Lead'

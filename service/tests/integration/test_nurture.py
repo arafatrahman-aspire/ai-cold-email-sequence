@@ -581,3 +581,42 @@ async def test_dev_sends_only_with_send_now(world, monkeypatch):
     assert len(mail.to("ciso@w.test")) == 1
     assert await jobs.send_now(mid) == "not_waiting"              # already sent
     assert (await enrollment(pg, lead))["step"] == 1
+
+
+@pytest.mark.anyio
+async def test_calendar_hand_off_signals_and_send_to_sales(world):
+    """0016: the calendar shows written and planned emails; a hand-off says why
+    in plain words; "Send to sales" emails it again."""
+    from app.nurture import exits, options, schedule
+    from app.nurture import repo as nrepo
+    from app.nurture.api import handle_click
+
+    pg, mail, start = world["pg"], world["mail"], world["start"]
+    lead, eid = await enrolled(pg, "W-9", "click@w.test", "HR Manager", "Cold", start)
+    await run(0, 0, start)                                   # email 1 written and sent at minute 0
+
+    cfg = await options.load()
+    data = await nrepo.schedule(start - timedelta(minutes=1), start + timedelta(days=1))
+    items = schedule.calendar(data, cfg, start - timedelta(minutes=1), start + timedelta(days=1))
+    mine = [i for i in items if i["enrollment_id"] == eid]
+    assert [(i["step"], i["planned"]) for i in mine] == [(1, False), (2, True), (3, True), (4, True), (5, True), (6, True)]
+    assert mine[0]["status"] == "sent" and mine[0]["lead_id"] == lead   # test mode: a day is a minute
+
+    # Not handed off yet: "Send to sales" is refused.
+    with pytest.raises(ValueError):
+        await exits.send_to_sales(eid, cfg, "me@aspire.test")
+
+    await handle_click(await sent_message(pg, eid, 1), "pricing", "Mozilla/5.0")
+    [row] = [r for r in await nrepo.handoff_signals() if str(r["id"]) == eid]
+    assert str(row["lead_id"]) == lead and len(row["clicks"]) == 1
+    words = schedule.signals(row, "pricing_click", [])
+    assert words[:2] == ["They clicked the pricing link", "Clicked the pricing link once (email 1)"]
+    # Handed off: nothing more is planned for this lead.
+    after = await nrepo.schedule(start, start + timedelta(days=1))
+    assert eid not in [str(e["enrollment_id"]) for e in after["live"]]
+
+    before = len(mail.to("sales@aspire.test"))
+    assert await exits.send_to_sales(eid, cfg, "me@aspire.test") == "sales@aspire.test"
+    assert len(mail.to("sales@aspire.test")) == before + 1
+    assert await pg.fetchval("select count(*) from cold_email.nurture_events where kind='sent_to_sales'"
+                             " and enrollment_id=$1::uuid", eid) == 1

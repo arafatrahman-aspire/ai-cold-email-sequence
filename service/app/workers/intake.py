@@ -39,6 +39,14 @@ async def process_lead(lead: dict) -> str:
         await repo.mark_lead(lead_id, "unsubscribed", "address on suppression list")
         return "unsubscribed"
 
+    # A campaign's playbook steers the writing; General leads write as before.
+    campaign = await repo.campaign_for_lead(lead_id)
+    if campaign and campaign.get("status") == "ended":
+        await repo.mark_lead(lead_id, "stopped", f'campaign "{campaign.get("name")}" ended')
+        return "stopped"
+    if campaign and campaign.get("playbook"):
+        lead = {**lead, "playbook": campaign["playbook"]}
+
     gaps = await settings_store.step_gaps()
     hours = await settings_store.business_hours(lead.get("timezone"))
 
@@ -96,9 +104,39 @@ async def _auto_enroll() -> int:
     return added
 
 
+async def _auto_add_to_campaigns(per_campaign: int = 25) -> int:
+    """Active campaigns with "add new matching leads" on take up to
+    ``per_campaign`` new matches each tick. Never raises (before 0017 there
+    are no campaigns)."""
+    try:
+        campaigns = [c for c in await repo.campaign_list() if c["status"] == "active" and c.get("auto_add")]
+    except Exception:
+        return 0
+    if not campaigns:
+        return 0
+    contactable = await settings_store.contactable_statuses()
+    skip_nurture = bool(await settings_store.get("skip_if_in_email_nurture"))
+    added = 0
+    for c in campaigns:
+        try:
+            leads, _ = await repo.campaign_audience(c.get("audience") or {}, contactable, per_campaign)
+            for lead in leads:
+                outcome, _ = await repo.campaign_enroll(str(c["id"]), str(lead["id"]), contactable, skip_nurture)
+                added += outcome == "enrolled"
+        except Exception:
+            log.exception("adding new leads to campaign %s failed", c.get("name"))
+    if added:
+        log.info("added %d new lead(s) to campaigns", added)
+    return added
+
+
 async def run_once() -> dict[str, int]:
     """One intake tick. Returns a count of leads by resulting status."""
     counts: dict[str, int] = {}
+    # Campaigns first: a lead matching a campaign joins it, not General.
+    to_campaigns = await _auto_add_to_campaigns()
+    if to_campaigns:
+        counts["added_to_campaigns"] = to_campaigns
     enrolled = await _auto_enroll()
     if enrolled:
         counts["auto_enrolled"] = enrolled

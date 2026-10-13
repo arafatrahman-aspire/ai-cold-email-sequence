@@ -7,7 +7,7 @@ import { AutoTextarea, Badge, Card, ErrorNote, Field, Spinner, useAction } from 
 const STAGES = ['awareness', 'consideration', 'decision']
 const KINDS = ['guide', 'case_study', 'checklist', 'report', 'webinar', 'blog', 'roi']
 const CTA = { soft: 'Soft (resource first)', demo: 'Demo', pricing: 'Pricing' }
-const SECTIONS = [['briefs', 'Step briefs'], ['fallbacks', 'Fallback emails'], ['resources', 'Resource library']]
+const SECTIONS = [['preview', 'Journey preview'], ['briefs', 'Step briefs'], ['fallbacks', 'Fallback emails'], ['resources', 'Resource library']]
 
 // Like Field, but not a <label>: for groups of checkboxes.
 function Group({ label, hint, children }) {
@@ -281,8 +281,67 @@ function Resources() {
   )
 }
 
+// What a lead receives, step by step: the day each email goes out, what it is
+// for, and the standard text used when the AI draft is not.
+function JourneyPreview() {
+  const [persona, setPersona] = useState('ciso')
+  const [temp, setTemp] = useState('cold')
+  const [data, setData] = useState(null)
+  const [{ error }, load] = useAction(async () => {
+    const [b, f, s] = await Promise.all([api.nurtureBriefs(), api.nurtureFallbacks(), api.nurtureSettings()])
+    setData({ briefs: b.briefs || [], fallbacks: f.fallbacks || [], cadence: s.settings?.cadence || {} })
+  })
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const days = data?.cadence?.[temp] || []
+  const steps = [1, 2, 3, 4, 5, 6].map((step) => ({
+    step,
+    day: days[step - 1],
+    brief: data?.briefs.find((b) => b.persona === persona && b.temperature === temp && b.step === step),
+    fallback: data?.fallbacks.find((f) => f.persona === persona && f.step === step),
+  }))
+  return (
+    <Card title="Journey preview" subtitle="What one lead receives, and when. The AI writes each email from its brief; if it cannot, the standard text below is sent.">
+      <div className="content-pickers">
+        <Picker label="Persona" value={persona} options={NURTURE_PERSONAS} onChange={setPersona} />
+        <Picker label="Track" value={temp} options={TEMPERATURES} onChange={setTemp} />
+      </div>
+      <ErrorNote error={error} onRetry={load} />
+      {!data ? <Spinner /> : (
+        <ol className="preview-steps">
+          {steps.map(({ step, day, brief, fallback }) => (
+            <li key={step} className="preview-step">
+              <div className="preview-day">
+                <strong>Day {day ?? '—'}</strong>
+                <span className="muted">Email {step} of 6</span>
+              </div>
+              <div className="preview-what">
+                {brief && (
+                  <p>
+                    <strong>{brief.goal}</strong>
+                    <span className="muted"> · {CTA[brief.cta_emphasis] || brief.cta_emphasis} call to action · up to {brief.max_words} words</span>
+                  </p>
+                )}
+                {brief?.angle && <p className="muted">{brief.angle}</p>}
+                {fallback && (
+                  <details>
+                    <summary>Standard text: {fallback.subject}</summary>
+                    <div className="email-body journey-body">{fallback.body}</div>
+                  </details>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </Card>
+  )
+}
+
 export default function NurtureContent() {
-  const [section, setSection] = useState('briefs')
+  const [section, setSection] = useState('preview')
   return (
     <div className="stack">
       <div className="toolbar">
@@ -296,6 +355,7 @@ export default function NurtureContent() {
           <button key={k} role="tab" aria-selected={section === k} className={`chip ${section === k ? 'is-active' : ''}`} onClick={() => setSection(k)}>{l}</button>
         ))}
       </div>
+      {section === 'preview' && <JourneyPreview />}
       {section === 'briefs' && <Briefs />}
       {section === 'fallbacks' && <Fallbacks />}
       {section === 'resources' && <Resources />}

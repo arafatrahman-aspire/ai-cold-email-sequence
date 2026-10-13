@@ -33,7 +33,13 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
 
-ROLES = {"admin", "marketing"}
+ROLES = {"admin", "superadmin", "marketing"}
+# Admins also see configuration, test mode and dev tools; marketing does not.
+ADMIN_ROLES = {"admin", "superadmin"}
+
+
+def is_admin(user: dict) -> bool:
+    return user.get("role") in ADMIN_ROLES
 LOOPBACK = {"localhost", "127.0.0.1", "::1", "[::1]"}
 _TOKEN = re.compile(r"^[A-Za-z0-9_-]{43,128}$")
 _NO_STORE = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}

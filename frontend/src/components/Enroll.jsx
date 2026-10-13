@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { EMAIL_STATUSES, ENROLLMENT_BADGE, enrollOutcome, formatNumber, relativeTime, shortDateTime } from '../labels.js'
 import { AutoTextarea, Badge, Card, ErrorNote, Field, Spinner, useAction } from './ui.jsx'
+import { LeadLink } from './LeadJourney.jsx'
 
 const PAGE = 50
 
@@ -354,7 +355,7 @@ function LeadBrowser() {
                       )}
                     </td>
                     <td>
-                      <strong>{fullName(l) || '—'}</strong>
+                      <strong><LeadLink leadId={l.id}>{fullName(l) || '—'}</LeadLink></strong>
                       <div>{l.email || <span className="muted">No email</span>}</div>
                       <div className="muted"><code>{l.lead_ref || l.id.slice(0, 8)}</code></div>
                     </td>

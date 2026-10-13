@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app import db, regions, repository as repo, settings_store
-from app.auth import SessionAuth, read_auth_config
+from app.auth import SessionAuth, is_admin, read_auth_config
 from app.config import get_settings
 from app.graph.build import generate_sequence
 from app.graph.persona import keyword_persona
@@ -83,9 +83,17 @@ app.include_router(session_auth.router, prefix="/auth")
 # for scripts). Only /health stays open, for the container healthcheck.
 require_user = session_auth.require_session
 
+
+async def require_admin(user: dict = Depends(require_user)) -> dict:
+    """Configuration, test and dev endpoints: admin / superadmin only."""
+    if not is_admin(user):
+        raise HTTPException(status_code=403, detail="admin_only")
+    return user
+
+
 # Email Nurture: public click / unsubscribe pages (no login) and the console API.
 app.include_router(nurture_api.public_router())
-app.include_router(nurture_api.console_router(require_user))
+app.include_router(nurture_api.console_router(require_user, require_admin))
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +196,7 @@ async def health() -> dict:
     }
 
 
-@app.post("/preview", dependencies=[Depends(require_user)])
+@app.post("/preview", dependencies=[Depends(require_admin)])
 async def preview(request: PreviewRequest) -> dict:
     """Draft a sequence for an arbitrary lead without persisting anything.
 
@@ -208,7 +216,7 @@ async def preview(request: PreviewRequest) -> dict:
     }
 
 
-@app.get("/route", dependencies=[Depends(require_user)])
+@app.get("/route", dependencies=[Depends(require_admin)])
 async def route(job_title: str) -> dict:
     """Show which persona a job title lands on, and by which mechanism."""
     persona = keyword_persona(job_title)
@@ -327,6 +335,190 @@ async def lead_emails(lead_id: UUID) -> dict:
     return {"emails": await repo.lead_emails(str(lead_id))}
 
 
+# ---------------------------------------------------------------------------
+# Campaigns (0017_campaigns.sql): an audience, a playbook, start/stop, results
+# ---------------------------------------------------------------------------
+
+_Short = Field(default="", max_length=300)
+
+
+class Audience(BaseModel):
+    titles: list[str] = Field(default_factory=list, max_length=30)
+    industries: list[str] = Field(default_factory=list, max_length=30)
+    countries: list[str] = Field(default_factory=list, max_length=30)
+    sources: list[str] = Field(default_factory=list, max_length=30)
+    tiers: list[str] = Field(default_factory=list, max_length=3)
+
+    @field_validator("titles", "industries", "countries", "sources", "tiers")
+    @classmethod
+    def _clean(cls, v: list[str]) -> list[str]:
+        return [s.strip()[:100] for s in v if s and s.strip()]
+
+
+class Playbook(BaseModel):
+    angle: str = Field(default="", max_length=500)
+    value_points: list[str] = Field(default_factory=list, max_length=10)
+    proof: list[str] = Field(default_factory=list, max_length=10)
+    offer: str = _Short
+    cta: str = _Short
+    tone: str = _Short
+    banned_claims: list[str] = Field(default_factory=list, max_length=30)
+
+    @field_validator("value_points", "proof", "banned_claims")
+    @classmethod
+    def _clean(cls, v: list[str]) -> list[str]:
+        return [s.strip()[:300] for s in v if s and s.strip()]
+
+
+class CampaignBody(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    audience: Audience = Field(default_factory=Audience)
+    playbook: Playbook = Field(default_factory=Playbook)
+    auto_add: bool = False
+
+
+class CampaignEnroll(BaseModel):
+    lead_ids: list[UUID] = Field(default_factory=list, max_length=500)
+    # Every matching lead (up to 500) instead of the ticked ones.
+    all_matching: bool = False
+
+
+CAMPAIGN_ACTIONS = {"start": "active", "pause": "paused", "resume": "active", "end": "ended"}
+
+
+async def _campaign(campaign_id: UUID) -> dict:
+    c = await repo.campaign_get(str(campaign_id))
+    if not c:
+        raise HTTPException(status_code=404, detail="no such campaign")
+    return c
+
+
+@app.get("/campaigns", dependencies=[Depends(require_user)])
+async def list_campaigns() -> dict:
+    """Every campaign with its results, and General (leads in no campaign)."""
+    campaigns, results = await asyncio.gather(repo.campaign_list(), repo.campaign_results())
+    by_id = {str(r["campaign_id"]) if r["campaign_id"] else None: r for r in results}
+    empty = {"leads": 0, "in_sequence": 0, "emails_sent": 0, "replied": 0, "interested": 0,
+             "meetings": 0, "bounced": 0, "unsubscribed": 0}
+
+    def numbers(key):
+        r = by_id.get(key) or {}
+        return {k: int(r.get(k) or 0) for k in empty}
+
+    return {"campaigns": [{**c, "results": numbers(str(c["id"]))} for c in campaigns],
+            "general": {"results": numbers(None)}}
+
+
+@app.post("/campaigns")
+async def create_campaign(body: CampaignBody, user: dict = Depends(require_user)) -> dict:
+    try:
+        cid = await repo.campaign_save(None, body.name.strip(), body.audience.model_dump(),
+                                       body.playbook.model_dump(), body.auto_add, user.get("email") or "someone")
+    except db.DatabaseError as exc:
+        if "campaigns_name_idx" in str(exc) or "duplicate" in str(exc):
+            raise HTTPException(status_code=409, detail="a campaign with this name already exists")
+        raise
+    return await repo.campaign_get(cid)
+
+
+@app.put("/campaigns/{campaign_id}")
+async def update_campaign(campaign_id: UUID, body: CampaignBody, user: dict = Depends(require_user)) -> dict:
+    await _campaign(campaign_id)
+    try:
+        cid = await repo.campaign_save(str(campaign_id), body.name.strip(), body.audience.model_dump(),
+                                       body.playbook.model_dump(), body.auto_add, user.get("email") or "someone")
+    except db.DatabaseError as exc:
+        if "campaigns_name_idx" in str(exc) or "duplicate" in str(exc):
+            raise HTTPException(status_code=409, detail="a campaign with this name already exists")
+        raise
+    if not cid:
+        raise HTTPException(status_code=409, detail="an ended campaign cannot be changed")
+    return await repo.campaign_get(cid)
+
+
+@app.get("/campaigns/{campaign_id}/audience", dependencies=[Depends(require_user)])
+async def campaign_audience(campaign_id: UUID, limit: int = 50, offset: int = 0) -> dict:
+    """Shared leads that match the campaign and are in no cold sequence yet."""
+    c = await _campaign(campaign_id)
+    leads, total = await repo.campaign_audience(
+        c.get("audience") or {}, await settings_store.contactable_statuses(), max(1, min(limit, 200)), max(0, offset))
+    return {"leads": leads, "total": total}
+
+
+@app.post("/campaigns/{campaign_id}/enroll", dependencies=[Depends(require_user)])
+async def campaign_enroll(campaign_id: UUID, body: CampaignEnroll) -> dict:
+    c = await _campaign(campaign_id)
+    if c["status"] == "ended":
+        raise HTTPException(status_code=409, detail="this campaign has ended")
+    contactable = await settings_store.contactable_statuses()
+    skip_nurture = bool(await settings_store.get("skip_if_in_email_nurture"))
+    ids = [str(i) for i in body.lead_ids]
+    if body.all_matching:
+        leads, _ = await repo.campaign_audience(c.get("audience") or {}, contactable, 500)
+        ids = [str(lead["id"]) for lead in leads]
+    results = []
+    for ref in ids:
+        outcome, lead_uuid = await repo.campaign_enroll(str(campaign_id), ref, contactable, skip_nurture)
+        results.append({"lead_id": lead_uuid or ref, "outcome": outcome})
+    return {"enrolled": sum(r["outcome"] == "enrolled" for r in results), "results": results}
+
+
+class CampaignPreview(BaseModel):
+    lead_id: Optional[UUID] = None
+
+
+@app.post("/campaigns/{campaign_id}/preview", dependencies=[Depends(require_user)])
+async def campaign_preview(campaign_id: UUID, body: CampaignPreview | None = None) -> dict:
+    """Write one sample sequence with the campaign's playbook, for a lead from
+    its audience (or the one given). Nothing is saved or sent."""
+    c = await _campaign(campaign_id)
+    if body and body.lead_id:
+        # A lead already in a cold sequence (its details include corrections).
+        lead = await repo.lead_for_step(str(body.lead_id))
+        if lead is None:
+            raise HTTPException(status_code=404, detail="this lead is not in the cold sequence")
+    else:
+        # The first lead of the audience: not enrolled yet, so its shared details.
+        leads, _ = await repo.campaign_audience(c.get("audience") or {}, await settings_store.contactable_statuses(), 1)
+        if not leads:
+            raise HTTPException(status_code=409, detail="no lead matches this audience to preview with")
+        lead = leads[0]
+    lead = {**lead, "id": "preview", "playbook": c.get("playbook") or {}}
+    result = await generate_sequence(lead, step_count=len(await settings_store.step_gaps()))
+    return {
+        "lead": {k: lead.get(k) for k in ("first_name", "last_name", "email", "job_title", "company")},
+        "persona": result.get("persona"),
+        "status": result.get("status"),
+        "validation_errors": result.get("validation_errors") or [],
+        "emails": result.get("emails") or [],
+    }
+
+
+# Declared after /enroll and /preview, which it would otherwise catch.
+@app.post("/campaigns/{campaign_id}/{action}", dependencies=[Depends(require_user)])
+async def campaign_action(campaign_id: UUID, action: str) -> dict:
+    """start | pause | resume | end. Ending stops the campaign's sequences
+    (what is unsent is cancelled; sent emails and replies stay)."""
+    if action not in CAMPAIGN_ACTIONS:
+        raise HTTPException(status_code=404, detail=f"actions: {', '.join(CAMPAIGN_ACTIONS)}")
+    await _campaign(campaign_id)
+    stopped = await repo.campaign_set_status(str(campaign_id), CAMPAIGN_ACTIONS[action])
+    if stopped < 0:
+        raise HTTPException(status_code=409, detail="not possible now (an ended campaign stays ended; only a running one can be paused)")
+    return {"campaign": await repo.campaign_get(str(campaign_id)), "stopped": stopped}
+
+
+@app.get("/leads/{lead_id}/journey", dependencies=[Depends(require_user)])
+async def lead_journey(lead_id: UUID) -> dict:
+    """One lead's whole story: cold emails, replies and how they were read,
+    our answers, meetings, Email Nurture emails, clicks and hand-off."""
+    journey = await repo.lead_journey(str(lead_id))
+    if not journey.get("lead") and not journey.get("items"):
+        raise HTTPException(status_code=404, detail="no such lead")
+    journey["campaign"] = await repo.campaign_for_lead(str(lead_id))
+    return journey
+
+
 @app.put("/emails/{email_id}", dependencies=[Depends(require_user)])
 async def edit_email(email_id: UUID, request: EmailEdit) -> dict:
     """Change an email that has not been sent yet. It goes out as edited."""
@@ -340,12 +532,12 @@ async def run_intake() -> dict:
     return {"result": await intake.run_once()}
 
 
-@app.post("/run/sender", dependencies=[Depends(require_user)])
+@app.post("/run/sender", dependencies=[Depends(require_admin)])
 async def run_sender() -> dict:
     return {"result": await sender.run_once()}
 
 
-@app.post("/send-now", dependencies=[Depends(require_user)])
+@app.post("/send-now", dependencies=[Depends(require_admin)])
 async def send_now(lead_id: Optional[UUID] = None) -> dict:
     """Send the next email of every scheduled lead now (or of ``lead_id``).
 
@@ -376,7 +568,7 @@ async def replies(type: str = "reply", limit: int = 50) -> dict:
     return {"replies": events}
 
 
-@app.post("/replies/test-alert", dependencies=[Depends(require_user)])
+@app.post("/replies/test-alert", dependencies=[Depends(require_admin)])
 async def test_reply_alert() -> dict:
     """Send a sample reply alert to reply_alert_email, to check the setup."""
     to = str(await settings_store.get("reply_alert_email") or "").strip()
@@ -425,13 +617,13 @@ async def read_settings() -> dict:
     return {"settings": await repo.get_settings()}
 
 
-@app.put("/settings/{key}", dependencies=[Depends(require_user)])
+@app.put("/settings/{key}", dependencies=[Depends(require_admin)])
 async def write_setting(key: str, update: SettingUpdate) -> dict:
     await settings_store.set_value(key, update.value, update.description)
     return {"key": key, "value": update.value}
 
 
-@app.post("/suppress", dependencies=[Depends(require_user)])
+@app.post("/suppress", dependencies=[Depends(require_admin)])
 async def suppress(email: EmailStr, reason: str = "manual") -> dict:
     await repo.suppress(str(email), reason)
     lead_id = await repo.match_lead_by_email(str(email))
@@ -476,6 +668,31 @@ class DraftEdit(BaseModel):
     body: str = Field(min_length=1, max_length=5000)
 
 
+class BookRequest(BaseModel):
+    start: datetime
+
+    @field_validator("start")
+    @classmethod
+    def _aware(cls, v: datetime) -> datetime:
+        if v.tzinfo is None:
+            raise ValueError("start needs a timezone, e.g. 2026-10-14T09:00:00+00:00")
+        return v
+
+
+class TimezoneRequest(BaseModel):
+    timezone: str = Field(min_length=1, max_length=64)
+
+
+class Snippet(BaseModel):
+    id: Optional[str] = Field(default=None, max_length=40)
+    title: str = Field(min_length=1, max_length=100)
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class SnippetList(BaseModel):
+    snippets: list[Snippet] = Field(max_length=50)
+
+
 @app.get("/triage/stats", dependencies=[Depends(require_user)])
 async def triage_stats() -> dict:
     """Counts by category, drafts by status, and the reply-to-meeting rate."""
@@ -498,6 +715,54 @@ async def triage_events(category: Optional[str] = None, type: str = "reply,auto_
     return {"events": events}
 
 
+@app.get("/triage/events/{event_id}/times", dependencies=[Depends(require_user)])
+async def triage_event_times(event_id: UUID) -> dict:
+    """Times worth one click on this reply's card, and why none fit, if so."""
+    try:
+        return await triage_worker.times_for_event(str(event_id))
+    except triage_worker.CardError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.post("/triage/events/{event_id}/book")
+async def triage_event_book(event_id: UUID, request: BookRequest, user: dict = Depends(require_user)) -> dict:
+    """Book the time a person picked on the reply card; a confirmation for
+    the lead is written and follows the usual send rules."""
+    who = user.get("email") or user.get("id") or "someone"
+    try:
+        return await triage_worker.book_from_card(str(event_id), request.start, who)
+    except triage_worker.CardError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.put("/leads/{lead_id}/timezone", dependencies=[Depends(require_user)])
+async def set_lead_timezone(lead_id: UUID, request: TimezoneRequest) -> dict:
+    """Correct an enrolled lead's timezone (send hours and meeting times)."""
+    tz = request.timezone.strip()
+    if not regions.is_valid_timezone(tz):
+        raise HTTPException(status_code=422, detail="unknown timezone, e.g. Asia/Dhaka or America/New_York")
+    if not await repo.set_lead_timezone(str(lead_id), tz):
+        raise HTTPException(status_code=404, detail="this lead is not in the cold sequence")
+    return {"lead_id": str(lead_id), "timezone": tz}
+
+
+@app.get("/triage/snippets", dependencies=[Depends(require_user)])
+async def triage_snippets() -> dict:
+    """The answer library: approved wording the AI reuses."""
+    return {"snippets": await settings_store.triage_snippets()}
+
+
+@app.put("/triage/snippets")
+async def save_triage_snippets(request: SnippetList, user: dict = Depends(require_user)) -> dict:
+    import uuid as _uuid
+
+    snippets = [{"id": s.id or _uuid.uuid4().hex[:12], "title": s.title.strip(), "text": s.text.strip()}
+                for s in request.snippets]
+    who = user.get("email") or "someone"
+    await settings_store.set_value("triage_snippets", snippets, f"answer library, last changed by {who}")
+    return {"snippets": snippets}
+
+
 @app.post("/triage/events/{event_id}/rerun", dependencies=[Depends(require_user)])
 async def triage_rerun(event_id: UUID, request: RetriageRequest | None = None) -> dict:
     """Triage a reply again, optionally with the correct category.
@@ -515,9 +780,11 @@ async def triage_drafts(status: str = "pending,approved,failed", limit: int = 50
     return {"drafts": await repo.list_drafts(_csv(status, DRAFT_STATUSES, "status"), max(1, min(limit, 200)))}
 
 
-@app.put("/triage/drafts/{draft_id}", dependencies=[Depends(require_user)])
-async def triage_edit_draft(draft_id: UUID, edit: DraftEdit) -> dict:
-    if not await repo.update_draft(str(draft_id), edit.subject.strip(), edit.body.strip()):
+@app.put("/triage/drafts/{draft_id}")
+async def triage_edit_draft(draft_id: UUID, edit: DraftEdit, user: dict = Depends(require_user)) -> dict:
+    # The AI's original is kept, so the AI can learn the team's style.
+    who = user.get("email") or user.get("id") or "someone"
+    if not await repo.edit_draft(str(draft_id), edit.subject.strip(), edit.body.strip(), who):
         raise HTTPException(status_code=409, detail="only a waiting or failed draft can be edited")
     return {"id": str(draft_id), "saved": True}
 
@@ -564,7 +831,7 @@ async def run_calendar_sync() -> dict:
     return {"result": await calendar_sync.run_once(), "sync": calendar_sync.last_run}
 
 
-@app.post("/triage/evaluate", dependencies=[Depends(require_user)])
+@app.post("/triage/evaluate", dependencies=[Depends(require_admin)])
 async def triage_evaluate() -> dict:
     """Run the 50-reply test set through the classifier (takes a minute or two)."""
     from app.triage.evaluate import evaluate
@@ -574,7 +841,7 @@ async def triage_evaluate() -> dict:
     return report
 
 
-@app.get("/triage/evaluation", dependencies=[Depends(require_user)])
+@app.get("/triage/evaluation", dependencies=[Depends(require_admin)])
 async def triage_evaluation() -> dict:
     rows = {r["key"]: r["value"] for r in await repo.get_settings()}
     return {"report": rows.get("triage_last_eval")}

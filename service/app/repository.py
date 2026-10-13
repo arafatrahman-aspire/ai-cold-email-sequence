@@ -93,6 +93,64 @@ async def edit_email(email_id: str, subject: str, body: str) -> bool:
     return bool(await db.rpc("edit_email", p_id=email_id, p_subject=subject, p_body=body))
 
 
+async def lead_journey(lead_id: str) -> dict[str, Any]:
+    """Everything that happened with one lead, newest first (0014_lead_journey.sql)."""
+    return await db.rpc("lead_journey", p_lead_id=lead_id) or {}
+
+
+# --- campaigns (0017_campaigns.sql) -------------------------------------------
+
+async def campaign_for_lead(lead_id: str) -> Optional[dict[str, Any]]:
+    """The lead's campaign ({id, name, status, playbook}), or None for General.
+    Before 0017 is run every lead is in General."""
+    try:
+        return await db.rpc("campaign_for_lead", p_lead_id=lead_id)
+    except db.DatabaseError as exc:
+        if not _not_installed(exc):
+            raise
+        return None
+
+
+async def campaign_list() -> list[dict[str, Any]]:
+    return await db.rows("campaign_list")
+
+
+async def campaign_get(campaign_id: str) -> Optional[dict[str, Any]]:
+    return await db.rpc("campaign_get", p_id=campaign_id)
+
+
+async def campaign_save(campaign_id: Optional[str], name: str, audience: dict, playbook: dict,
+                        auto_add: bool, user: str) -> Optional[str]:
+    result = await db.rpc("campaign_save", p_id=campaign_id, p_name=name, p_audience=audience,
+                          p_playbook=playbook, p_auto_add=auto_add, p_user=user)
+    return str(result) if result else None
+
+
+async def campaign_set_status(campaign_id: str, status: str) -> int:
+    """Sequences stopped (ending), 0, or -1 when the change is not allowed."""
+    return int(await db.rpc("campaign_set_status", p_id=campaign_id, p_status=status))
+
+
+async def campaign_audience(audience: dict, contactable: list[str], limit: int = 50,
+                            offset: int = 0) -> tuple[list[dict[str, Any]], int]:
+    rows = await db.rows("campaign_audience", p_audience=audience, p_contactable=contactable,
+                         p_limit=limit, p_offset=offset)
+    total = int(rows[0]["total"]) if rows else 0
+    return [{k: v for k, v in r.items() if k != "total"} for r in rows], total
+
+
+async def campaign_enroll(campaign_id: str, ref: str, contactable: list[str],
+                          skip_if_in_nurture: bool) -> tuple[str, Optional[str]]:
+    rows = await db.rows("campaign_enroll", p_campaign_id=campaign_id, p_ref=ref,
+                         p_contactable=contactable, p_skip_nurture=skip_if_in_nurture)
+    row = rows[0] if rows else {"outcome": "not_found", "lead_id": None}
+    return row["outcome"], (str(row["lead_id"]) if row.get("lead_id") else None)
+
+
+async def campaign_results() -> list[dict[str, Any]]:
+    return await db.rows("campaign_results")
+
+
 async def auto_enroll(
     sources: list[str],
     contactable_statuses: list[str],
@@ -507,6 +565,41 @@ async def list_drafts(statuses: list[str] | None, limit: int = 50) -> list[dict[
 
 async def update_draft(draft_id: str, subject: str, body: str) -> bool:
     return bool(await db.rpc("update_draft", p_id=draft_id, p_subject=subject, p_body=body))
+
+
+def _not_installed(exc: Exception) -> bool:
+    """A function from a migration that has not been run yet."""
+    return "PGRST202" in str(exc)
+
+
+async def edit_draft(draft_id: str, subject: str, body: str, user: str) -> bool:
+    """Edit a waiting answer, keeping the AI's original for learning
+    (0015_triage_tools.sql). Before 0015 is run: a plain edit, as before."""
+    try:
+        return bool(await db.rpc("edit_draft", p_id=draft_id, p_subject=subject, p_body=body, p_user=user))
+    except db.DatabaseError as exc:
+        if not _not_installed(exc):
+            raise
+        return await update_draft(draft_id, subject, body)
+
+
+async def draft_examples(kind: str, limit: int = 3) -> list[dict[str, Any]]:
+    """Answers of this kind people edited and sent. Never fails: no examples
+    just means the AI writes as before."""
+    try:
+        return await db.rows("draft_examples", p_kind=kind, p_limit=limit)
+    except Exception as exc:
+        log.warning("draft examples unavailable (%s)", exc)
+        return []
+
+
+async def inbox_event(event_id: str) -> Optional[dict[str, Any]]:
+    rows = await db.rows("inbox_event", p_id=event_id)
+    return rows[0] if rows else None
+
+
+async def set_lead_timezone(lead_id: str, timezone_name: str) -> bool:
+    return bool(await db.rpc("set_lead_timezone", p_lead_id=lead_id, p_timezone=timezone_name))
 
 
 async def decide_draft(draft_id: str, decision: str, user: str) -> bool:

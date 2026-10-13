@@ -1,4 +1,11 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react'
+
+// The signed-in user ({id, email, role}). Admins (admin / superadmin) also see
+// configuration, test mode and dev tools; the server enforces the same rule.
+export const UserContext = createContext(null)
+export const ADMIN_ROLES = ['admin', 'superadmin']
+export const isAdminUser = (user) => ADMIN_ROLES.includes(user?.role)
+export const useIsAdmin = () => isAdminUser(useContext(UserContext))
 
 const ICONS = {
   good: 'M5 10.5l3.2 3.2L15 7',
