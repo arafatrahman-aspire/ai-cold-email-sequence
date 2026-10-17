@@ -41,15 +41,25 @@ def _guard(name: str, coro_fn):
     return _run
 
 
+# A job must fail this many runs in a row before anyone is emailed: one slow
+# database answer is retried a minute later and needs no human.
+ALERT_AFTER_FAILURES = 3
+_failures: dict[str, int] = {}
+
+
 def _guard_nurture(name: str, coro_fn):
-    """Like _guard, and a failure also emails the nurture alert address."""
+    """Like _guard; repeated failures also email the nurture alert address."""
     async def _run() -> None:
         try:
             await coro_fn()
+            _failures[name] = 0
         except Exception as exc:
-            log.exception("%s worker tick failed", name)
+            _failures[name] = _failures.get(name, 0) + 1
+            log.exception("%s worker tick failed (%d in a row)", name, _failures[name])
+            if _failures[name] < ALERT_AFTER_FAILURES:
+                return
             try:
-                await nurture_alerts.job_failed(await nurture_options.load(), name, exc)
+                await nurture_alerts.job_failed(await nurture_options.load(), name, exc, _failures[name])
             except Exception:
                 log.exception("could not send the %s failure alert", name)
 

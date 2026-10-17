@@ -21,6 +21,7 @@ from app.nurture import repo as nrepo
 from app.nurture.checks import Draft
 from app.nurture.render import render
 from app.scheduling import within_business_hours
+from app import settings_store
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
@@ -146,7 +147,7 @@ async def _send_one(m: dict[str, Any], cfg: dict[str, Any], ctx: dict[str, Any],
         Draft(m["subject"] or "", m["preheader"] or "", m["body"] or "", m.get("resource_id"), "demo"),
         message_id=mid, first_name=m.get("first_name"), resource=resource, branding=cfg["branding"],
         public_url=ctx["public"], unsubscribe_url=unsubscribe_url,
-        demo_fallback=get_settings().calcom_booking_url,
+        demo_fallback=get_settings().calcom_booking_url, style=ctx.get("style"),
     )
     if rendered.problems:
         # e.g. its resource was deleted: cancelled, and the next write tick writes it again.
@@ -180,9 +181,14 @@ async def _send_one(m: dict[str, Any], cfg: dict[str, Any], ctx: dict[str, Any],
 
 async def _send_context(cfg: dict[str, Any], now: datetime) -> dict[str, Any]:
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    box = await sending.sending_inbox()
+    style = await settings_store.email_style()
+    if not style.get("name") and box is not None:
+        style = {**style, "name": box.display_name or ""}
     return {
         "sent": await nrepo.sent_since(day_start),
-        "box": await sending.sending_inbox(),
+        "box": box,
+        "style": style,
         "reply_to": await sending.reply_to(),
         "public": sending.public_url(),
         "allow": options.allow_list(cfg),

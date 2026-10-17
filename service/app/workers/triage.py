@@ -22,6 +22,7 @@ from app import settings_store
 from app.calendar.base import Attendee, CalendarError, Slot
 from app.calendar.factory import get_calendar
 from app.calendar.slots import describe_slot, find_slot, pick_near, pick_slots
+from app.mail import templates
 from app.mail.base import Inbox, MailError, OutgoingMessage
 from app.mail.factory import get_sender
 from app.nurture import replies as nurture_replies
@@ -313,6 +314,15 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
 # Sending drafts
 # ---------------------------------------------------------------------------
 
+async def compose_answer(subject: str, body: str, inbox: Inbox) -> templates.Email:
+    """An answer to a reply as sent: the body (it ends with the sign-off name)
+    and the signature. No opt-out line: they wrote to us."""
+    style = await settings_store.email_style()
+    mail = templates.personal(body, templates.Signature.from_settings(style, inbox.display_name or ""),
+                              accent=templates.accent_color(style.get("accent")), subject=subject)
+    return mail if style.get("html", True) else templates.Email(mail.text, "")
+
+
 async def send_due_drafts(inboxes: dict[str, Inbox]) -> dict[str, int]:
     stats: dict[str, int] = {}
 
@@ -338,10 +348,12 @@ async def send_due_drafts(inboxes: dict[str, Inbox]) -> dict[str, int]:
                 await repo.finish_draft(draft_id, "failed", error="sending inbox is not active")
                 count("failed")
                 continue
+            mail = await compose_answer(d["subject"], d["body"], inbox)
             result = await get_sender().send(inbox, OutgoingMessage(
                 to_email=d["to_email"],
                 subject=d["subject"],
-                body_text=d["body"],
+                body_text=mail.text,
+                body_html=mail.html,
                 in_reply_to=d.get("in_reply_to"),
                 references=list(d.get("references_ids") or []),
             ))

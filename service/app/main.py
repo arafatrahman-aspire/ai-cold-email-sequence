@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -25,7 +26,7 @@ from app.config import get_settings
 from app.graph.build import generate_sequence
 from app.graph.persona import keyword_persona
 from app.llm.factory import close_gateway
-from app.mail.base import IncomingMessage, MailError, OutgoingMessage
+from app.mail.base import Inbox, IncomingMessage, MailError, OutgoingMessage
 from app.mail.factory import close_transports, get_sender
 from app.calendar.base import CalendarError
 from app.calendar.factory import close_calendar, get_calendar
@@ -333,6 +334,138 @@ async def retry_enrollment(lead_id: UUID, request: RetryRequest | None = None) -
 async def lead_emails(lead_id: UUID) -> dict:
     """The lead's drafted emails (and sent ones), in step order."""
     return {"emails": await repo.lead_emails(str(lead_id))}
+
+
+# ---------------------------------------------------------------------------
+# Email design: the signature and look of every email, and previews
+# ---------------------------------------------------------------------------
+
+class EmailStyle(BaseModel):
+    name: str = Field(default="", max_length=120)
+    title: str = Field(default="", max_length=120)
+    company: str = Field(default="", max_length=120)
+    website: str = Field(default="", max_length=200)
+    phone: str = Field(default="", max_length=40)
+    address: str = Field(default="", max_length=200)
+    sign_off: str = Field(default="", max_length=40)
+    opt_out: str = Field(default="", max_length=200)
+    accent: str = Field(default="#2563eb", pattern=r"^#[0-9a-fA-F]{6}$")
+    html: bool = True
+
+
+class RenderRequest(BaseModel):
+    kind: str = Field(pattern="^(cold|reply|nurture|handoff|alert)$")
+    subject: str = Field(default="", max_length=300)
+    body: str = Field(default="", max_length=20000)
+    preheader: str = Field(default="", max_length=300)
+    first_name: Optional[str] = Field(default=None, max_length=80)
+    resource_id: Optional[str] = Field(default=None, max_length=64)
+    cta_type: str = Field(default="demo", max_length=20)
+    message_id: Optional[str] = Field(default=None, max_length=64)
+    # A nurture email: its enrollment, to find the resource it links to.
+    enrollment_id: Optional[UUID] = None
+
+
+SAMPLES = {
+    "cold": ("Phishing reports without the chasing",
+             "Most IT teams I talk to run phishing simulations by hand: build the template, pick the "
+             "targets, chase the results into a spreadsheet.\n\nWe automate that end to end, so a campaign "
+             "takes minutes to set up and the report writes itself.\n\nWould it be worth a 15-minute look "
+             "next week?"),
+    "reply": ("Re: Phishing reports without the chasing",
+              "Hi Dana,\n\nThanks for getting back to me. Here are two times that work on my side:\n\n"
+              "Tuesday 14 October, 10:00-10:30 (Europe/London)\nWednesday 15 October, 14:00-14:30 "
+              "(Europe/London)\n\nOr pick any time that suits you here: https://cal.com/aspire/30min\n\nAlex"),
+    "nurture": ("The hidden IT cost of phishing",
+                "Phishing rarely shows up as one big event for IT. It shows up as tickets, password resets "
+                "and mailbox clean-ups.\n\nThe {{RESOURCE_LINK}} breaks down where that time goes and how "
+                "teams cut it.\n\nIf you would like to see how other IT teams handle it, you can "
+                "{{CTA_DEMO}} or {{CTA_PRICING}}."),
+}
+
+
+@app.get("/email-design", dependencies=[Depends(require_user)])
+async def get_email_design() -> dict:
+    return {"style": await settings_store.email_style()}
+
+
+@app.put("/email-design")
+async def save_email_design(style: EmailStyle, user: dict = Depends(require_user)) -> dict:
+    """Marketing owns the look: signature, sign-off, opt-out line, colour."""
+    value = {k: (v.strip() if isinstance(v, str) else v) for k, v in style.model_dump().items()}
+    await settings_store.set_value("email_style", value, f"email design, last changed by {user.get('email') or 'someone'}")
+    return {"style": await settings_store.email_style()}
+
+
+@app.post("/email-design/render", dependencies=[Depends(require_user)])
+async def render_email(req: RenderRequest) -> dict:
+    """An email exactly as it would be sent (empty fields: a sample), as
+    {subject, html, text}. Nothing is sent."""
+    from app.mail import templates
+    from app.nurture import content as ncontent, exits as nexits, options as noptions, sending as nsending
+    from app.nurture.checks import Draft
+    from app.nurture.render import render as nrender
+
+    style = await settings_store.email_style()
+    inboxes = await repo.active_inboxes()
+    inbox = inboxes[0] if inboxes else None
+    subject, body = SAMPLES.get(req.kind, ("", ""))
+    subject, body = req.subject or subject, req.body or body
+
+    if req.kind in ("cold", "reply"):
+        fake = inbox or type("Box", (), {"display_name": "Alex Rivera"})()
+        mail = await (sender.compose_cold(subject, body, fake) if req.kind == "cold"
+                      else triage_worker.compose_answer(subject, body, fake))
+        return {"subject": subject, "html": mail.html, "text": mail.text,
+                "note": "" if mail.html else "HTML is turned off: this email goes out as plain text."}
+
+    if req.kind == "nurture":
+        cfg = await noptions.load()
+        resources = {r["id"]: r for r in await ncontent.resources()}
+        resource_id = req.resource_id
+        if not resource_id and req.enrollment_id and req.message_id:
+            from app.nurture import repo as nrepo
+            messages = ((await nrepo.detail(str(req.enrollment_id))) or {}).get("messages") or []
+            resource_id = next((m.get("resource_id") for m in messages if str(m.get("id")) == req.message_id), None)
+        resource = resources.get(resource_id) if resource_id else next(iter(resources.values()), None)
+        if resource is None:
+            resource = {"id": "sample", "title": "IT phishing cost guide", "url": "https://example.com/guide"}
+        if not style.get("name"):
+            box = await nsending.sending_inbox()
+            style = {**style, "name": (box.display_name if box else "") or ""}
+        branding = {**cfg["branding"], "demo_url": cfg["branding"].get("demo_url") or "https://example.com/demo",
+                    "pricing_url": cfg["branding"].get("pricing_url") or "https://example.com/pricing"}
+        public = nsending.public_url() or "https://example.com"
+        out = nrender(Draft(subject, req.preheader or "Where IT time goes, and how teams get it back", body,
+                            resource.get("id"), req.cta_type), message_id=req.message_id or "preview",
+                      first_name=req.first_name or "Dana", resource=resource, branding=branding,
+                      public_url=public, unsubscribe_url=f"{public}/n/u/preview", style=style)
+        return {"subject": subject, "html": out.html, "text": out.text, "note": "; ".join(out.problems)}
+
+    if req.kind == "handoff":
+        detail = {"enrollment": {"email": "dana@northwind.com", "persona": "it", "temperature": "warm",
+                                 "exit_reason": "pricing_click"},
+                  "lead": {"first_name": "Dana", "last_name": "Okafor", "job_title": "IT Manager",
+                           "company": "Northwind", "tier": "Warm"},
+                  "messages": [{"status": "sent", "step": i, "subject": f"Email {i}"} for i in (1, 2, 3)],
+                  "events": [{"kind": "click", "detail": {"step": 3, "link": "pricing"}}],
+                  "replies": []}
+        summary = ("Dana runs IT at Northwind and has read three emails about phishing workload. She "
+                   "clicked pricing in email 3. Open with how much ticket time a typical campaign saves.")
+        console = os.environ.get("APP_PUBLIC_URL", "").rstrip("/")
+        s, text = nexits.notification(detail, summary, console)
+        return {"subject": s, "html": nexits.notification_html(detail, summary, console), "text": text, "note": ""}
+
+    from app.mail.base import IncomingMessage
+    msg = IncomingMessage(uid=1, message_id="<sample@x>", in_reply_to=None, references=[],
+                          from_email="dana@northwind.com", to_email=inbox.email if inbox else "you@aspire.com",
+                          subject="Re: Phishing reports without the chasing",
+                          body_snippet="Sounds interesting. Could we talk on Tuesday at 10?",
+                          received_at=datetime.now(timezone.utc))
+    box = inbox or Inbox("x", "you@aspire.com", "Alex", "smtp", "X", None, 0)
+    lead = {"first_name": "Dana", "last_name": "Okafor", "job_title": "IT Manager", "company": "Northwind"}
+    s, text = alerts.build_alert(box, lead, msg)
+    return {"subject": s, "html": alerts.alert_html(box, lead, msg), "text": text, "note": ""}
 
 
 # ---------------------------------------------------------------------------

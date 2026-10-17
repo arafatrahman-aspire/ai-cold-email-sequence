@@ -79,9 +79,16 @@ def client() -> httpx.AsyncClient:
 
 async def rpc(function: str, **params: Any) -> Any:
     """Call ``cold_email.<function>`` with named arguments; return its JSON result."""
-    response = await client().post(
-        f"/rpc/{function}", content=json.dumps(params, default=_json_default)
-    )
+    try:
+        response = await client().post(
+            f"/rpc/{function}", content=json.dumps(params, default=_json_default)
+        )
+    except httpx.TimeoutException as exc:
+        # Name the call: a bare "ReadTimeout" tells nobody what was slow.
+        raise DatabaseError(
+            f"{function}: the database did not answer within {client().timeout.read or 0:.0f}s "
+            f"({type(exc).__name__})"
+        ) from exc
     if response.status_code >= 400:
         try:
             body = response.json()

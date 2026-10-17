@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from app import repository as repo
 from app import settings_store
+from app.mail import templates
 from app.mail.base import Inbox, OutgoingMessage
 from app.mail.factory import get_sender
 from app.nurture import repo as nrepo
@@ -42,12 +43,16 @@ async def _from() -> tuple[Optional[Inbox], Any]:
     return (inboxes[0] if inboxes else None), get_sender()
 
 
-async def send_internal(to: str, subject: str, body: str) -> None:
-    """Raises if it cannot be sent (the caller records why)."""
+async def send_internal(to: str, subject: str, body: str, html: Optional[str] = None) -> None:
+    """Raises if it cannot be sent (the caller records why). Without ``html``
+    the plain text is shown in the internal layout."""
     inbox, transport = await _from()
     if inbox is None:
         raise RuntimeError("no account to send internal email from")
-    await transport.send(inbox, OutgoingMessage(to_email=to, subject=subject[:200], body_text=body))
+    if html is None:
+        first, _, rest = body.partition("\n\n")
+        html = templates.internal(title=subject[:200], intro=first, note=rest.strip(), tone="warning")
+    await transport.send(inbox, OutgoingMessage(to_email=to, subject=subject[:200], body_text=body, body_html=html))
 
 
 async def alert(cfg: dict[str, Any], kind: str, subject: str, body: str) -> bool:
@@ -84,7 +89,10 @@ async def check_fallback_rate(cfg: dict[str, Any]) -> None:
                     "check results on recent messages in Email Nurture -> Leads.")
 
 
-async def job_failed(cfg: dict[str, Any], job: str, error: BaseException) -> None:
-    await alert(cfg, f"job:{job}", f"The {job} job failed",
-                f"The nurture {job} job raised an error:\n\n{type(error).__name__}: {error}\n\n"
-                "It runs again on its next cycle; see the service logs for details.")
+async def job_failed(cfg: dict[str, Any], job: str, error: BaseException, times: int = 1) -> None:
+    what = str(error) or type(error).__name__
+    await alert(cfg, f"job:{job}", f"The {job} job keeps failing",
+                f"The nurture {job} job failed {times} times in a row. Last error:\n\n{what}\n\n"
+                "It keeps retrying every cycle. If this is a database timeout, check that Supabase is "
+                "up (Supabase dashboard -> project status); otherwise see the service logs: "
+                f"docker logs out01-service 2>&1 | grep -A30 '{job} worker tick failed'")

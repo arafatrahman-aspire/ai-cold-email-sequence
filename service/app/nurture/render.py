@@ -13,6 +13,7 @@ import html
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from app.mail import templates
 from app.nurture import checks
 from app.nurture.safety import clean
 
@@ -45,8 +46,17 @@ def render(
     public_url: str,
     unsubscribe_url: str,
     demo_fallback: str = "",
+    style: Optional[dict[str, Any]] = None,
 ) -> Rendered:
+    """``style`` is the shared email design (settings ``email_style``): it fills
+    the signature and footer fields nurture's own branding leaves empty, and
+    gives the accent colour."""
+    style = style or {}
     brand = dict(branding)
+    for mine, shared in (("sender_name", "name"), ("sender_title", "title"), ("company_name", "company"),
+                         ("company_address", "address")):
+        if not str(brand.get(mine) or "").strip() and style.get(shared):
+            brand[mine] = style[shared]
     if not brand.get("demo_url") and demo_fallback:
         brand["demo_url"] = demo_fallback
     dest = destinations(brand, resource)
@@ -86,35 +96,27 @@ def render(
             + f"Unsubscribe: {unsubscribe_url}\n")
 
     # HTML: the body is escaped first, then the placeholders become anchors.
-    paragraphs = []
-    for para in draft.body.strip().split("\n\n"):
-        chunk = html.escape(para.strip()).replace("\n", "<br>")
-        for placeholder, kind in PLACEHOLDER_TYPE.items():
-            if kind in tracked:
-                chunk = chunk.replace(placeholder,
-                                      f'<a href="{html.escape(tracked[kind])}">{html.escape(label(kind))}</a>')
-        paragraphs.append(f'<p style="margin:0 0 14px">{chunk}</p>')
+    accent = templates.accent_color(style.get("accent"))
+    anchors = {placeholder: (f'<a href="{html.escape(tracked[kind])}" style="color:{accent};font-weight:600">'
+                             f'{html.escape(label(kind))}</a>')
+               for placeholder, kind in PLACEHOLDER_TYPE.items() if kind in tracked}
+    # One clear button for the email's main ask, when its link is in the email.
+    primary = {"demo": "demo", "pricing": "pricing"}.get(draft.cta_type, "resource")
+    if primary not in tracked:
+        primary = next((k for k in ("resource", "demo", "pricing") if k in tracked), None)
+    buttons = {"demo": "Book a short demo", "pricing": "See pricing",
+               "resource": f"Read {clean((resource or {}).get('title'), 60)}".strip() if resource else "Read more"}
+    cta = (buttons[primary], tracked[primary]) if primary else None
     logo = clean(brand.get("logo_url"), 400)
-    logo_html = (f'<img src="{html.escape(logo)}" alt="{html.escape(company)}" height="32" '
-                 f'style="display:block;margin-bottom:20px">') if logo.startswith("https://") else ""
-    sig_html = "<br>".join(html.escape(p) for p in (sender, title, company) if p)
-    pre = html.escape(clean(draft.preheader, 140))
-    html_doc = f"""<!doctype html>
-<html><body style="margin:0;padding:0;background:#f5f6f8">
-<span style="display:none;max-height:0;overflow:hidden;opacity:0">{pre}</span>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f8">
-<tr><td align="center" style="padding:24px 12px">
-<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:8px">
-<tr><td style="padding:28px 32px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55;color:#1f2329">
-{logo_html}<p style="margin:0 0 14px">{html.escape(greeting)}</p>
-{''.join(paragraphs)}
-<p style="margin:22px 0 0">{sig_html}</p>
-</td></tr></table>
-<p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:#6b7280;margin:16px 0 0">
-{html.escape(footer)}{'<br>' if footer else ''}<a href="{html.escape(unsubscribe_url)}" style="color:#6b7280">Unsubscribe</a>
-</p>
-</td></tr></table>
-</body></html>"""
+    html_doc = templates.branded(
+        greeting=greeting, body_html=templates.paragraphs(draft.body, accent, anchors),
+        preheader=clean(draft.preheader, 140), subject=clean(draft.subject, 200),
+        brand=templates.Branding(
+            company=company, address=address, logo_url=logo if logo.startswith("https://") else "", accent=accent,
+            signature=templates.Signature(name=sender, title=title, company=company,
+                                          website=clean(style.get("website"), 200), phone=clean(style.get("phone"), 40))),
+        cta=cta, unsubscribe_url=unsubscribe_url,
+        reason=f"You are receiving this because you were in touch with {company}." if company else "")
 
     problems += checks.unresolved(text) + checks.unresolved(html_doc)
     return Rendered(text=text, html=html_doc, problems=problems)

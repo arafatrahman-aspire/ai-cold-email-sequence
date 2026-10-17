@@ -600,3 +600,14 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .campaign-preview { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; }
 @media (max-width: 760px) { .campaign-row { grid-template-columns: 1fr; } }
 .campaign-toggle { display: flex; align-items: center; gap: 10px; }
+
+/* Email design and previews */
+.design-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 16px; align-items: start; }
+@media (max-width: 1000px) { .design-grid { grid-template-columns: 1fr; } }
+.email-frame { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.email-frame-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.email-iframe { width: 100%; height: 620px; border: 1px solid var(--border); border-radius: var(--radius); background: #fff; }
+.email-plain { white-space: pre-wrap; font: 13px/1.55 ui-monospace, Menlo, Consolas, monospace; padding: 14px; margin: 0; border: 1px solid var(--border); border-radius: var(--radius); max-height: 620px; overflow: auto; }
+.email-preview-pop { flex-basis: 100%; width: 100%; order: 10; }
+.color-field { display: flex; gap: 8px; align-items: center; }
+.color-field input[type="color"] { width: 40px; height: 34px; padding: 2px; }

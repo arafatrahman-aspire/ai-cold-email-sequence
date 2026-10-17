@@ -4,6 +4,7 @@ import { EXIT_REASONS, MESSAGE_STATUS, NURTURE_PERSONAS, relativeTime, shortDate
 import { AutoTextarea, Badge, Card, ErrorNote, Spinner, useAction, useIsAdmin } from '../ui.jsx'
 import { LeadLink } from '../LeadJourney.jsx'
 import AiBanner from './AiBanner.jsx'
+import EmailPreview from '../EmailPreview.jsx'
 
 function MessageCard({ m, onChanged, dev, canSend }) {
   const [subject, setSubject] = useState(m.subject || '')
@@ -63,6 +64,10 @@ function MessageCard({ m, onChanged, dev, canSend }) {
               ? <>Due now: goes out on the next send cycle unless you reject it</>
               : <>Sends <strong>{relativeTime(m.send_at)}</strong> ({shortDateTime(m.send_at)}) unless you reject it</>}
         </span>
+        <EmailPreview label="Preview as sent" request={() => ({
+          kind: 'nurture', subject, preheader, body, first_name: m.first_name || undefined,
+          message_id: m.id, enrollment_id: m.enrollment_id,
+        })} />
         <div className="draft-buttons">
           {dirty && <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { setSubject(m.subject || ''); setPreheader(m.preheader || ''); setBody(m.body || '') }}>Undo edits</button>}
           <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => act('reject')} title="It is written again (after two rejections the pre-approved text is used)">Reject</button>

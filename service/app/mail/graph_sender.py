@@ -112,7 +112,9 @@ class GraphSender(MailSender):
 
         draft = {
             "subject": message.subject,
-            "body": {"contentType": "Text", "content": message.body_text},
+            # Graph takes one body: the designed HTML when there is one.
+            "body": ({"contentType": "HTML", "content": message.body_html} if message.body_html
+                     else {"contentType": "Text", "content": message.body_text}),
             "toRecipients": [{"emailAddress": {"address": message.to_email}}],
             "internetMessageId": message_id,
             # Graph rejects the standard reserved headers, so custom x- headers

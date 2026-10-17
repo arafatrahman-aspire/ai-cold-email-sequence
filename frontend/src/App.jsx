@@ -3,6 +3,7 @@ import { api, setCsrfToken } from './api.js'
 import LeadJourney from './components/LeadJourney.jsx'
 import Campaigns from './components/Campaigns.jsx'
 import Dashboard from './components/Dashboard.jsx'
+import EmailDesign from './components/EmailDesign.jsx'
 import Enroll from './components/Enroll.jsx'
 import Preview from './components/Preview.jsx'
 import Settings from './components/Settings.jsx'
@@ -31,6 +32,7 @@ const WORKSPACES = {
       ['overview', 'Overview'],
       ['campaigns', 'Campaigns'],
       ['enroll', 'Enroll'],
+      ['design', 'Email design'],
       ['preview', 'Preview', 'admin'],
       ['settings', 'Settings', 'admin'],
       ['tools', 'Tools', 'admin'],
@@ -323,6 +325,7 @@ function Console({ user, onLogout }) {
             {tab === 'overview' && <Dashboard health={health} onRefreshHealth={refreshHealth} />}
             {tab === 'campaigns' && <Campaigns />}
             {tab === 'enroll' && <Enroll />}
+            {tab === 'design' && <EmailDesign />}
             {tab === 'preview' && <Preview />}
             {tab === 'settings' && <Settings />}
             {tab === 'tools' && <Tools />}

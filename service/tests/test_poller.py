@@ -146,3 +146,31 @@ async def test_send_only_inbox_is_not_read(monkeypatch, fake_repo):
 
     assert await poller.poll_inbox(inbox) == ({}, None)
     assert reader.fetched is False
+
+
+@pytest.mark.anyio
+async def test_nurture_job_alerts_only_after_repeated_failures(monkeypatch):
+    from app.workers import scheduler
+
+    sent = []
+
+    async def job_failed(cfg, name, exc, times=1):
+        sent.append(times)
+
+    async def load():
+        return {}
+
+    monkeypatch.setattr(scheduler.nurture_alerts, "job_failed", job_failed)
+    monkeypatch.setattr(scheduler.nurture_options, "load", load)
+    outcome = {"fail": True}
+
+    async def tick():
+        if outcome["fail"]:
+            raise RuntimeError("ReadTimeout")
+
+    run = scheduler._guard_nurture("nurture_test", tick)
+    await run(); await run()                       # two blips: nobody is emailed
+    outcome["fail"] = False; await run()           # a success resets the count
+    outcome["fail"] = True
+    await run(); await run(); await run()
+    assert sent == [3]

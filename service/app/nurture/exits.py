@@ -15,6 +15,7 @@ import os
 from typing import Any
 
 from app.llm.factory import get_gateway
+from app.mail import templates
 from app.nurture import alerts
 from app.nurture import repo as nrepo
 from app.nurture.options import PERSONAS
@@ -124,6 +125,28 @@ def notification(detail: dict[str, Any], summary: str, console_url: str) -> tupl
     return f"Nurture hand-off: {who} ({facts['trigger']})", "\n".join(lines)
 
 
+def notification_html(detail: dict[str, Any], summary: str, console_url: str) -> str:
+    """The hand-off email to sales, designed."""
+    facts = _facts(detail)
+    who = facts["name"] or facts["email"]
+    clicked = ", ".join(f"{c['link']} (email {c['step']})" for c in facts["clicked"]) or "nothing yet"
+    replies = "\n\n".join(f"{r['category'] or 'reply'}: {r['text'][:300]}" for r in facts["replies"])
+    lead_id = (detail.get("enrollment") or {}).get("lead_id")
+    action = None
+    if console_url:
+        action = ("Open the lead", f"{console_url}/#lead/{lead_id}" if lead_id else f"{console_url}/#nurture/handoffs")
+    return templates.internal(
+        title=f"{who} is ready for sales",
+        intro=summary,
+        facts=[("Why now", facts["trigger"]), ("Email", facts["email"]),
+               ("Role", ", ".join(p for p in (facts["job_title"], facts["company"]) if p)),
+               ("Persona", f"{facts['persona']} ({facts['track']} track)"),
+               ("Emails received", f"{len(facts['emails_received'])} of 6"), ("Clicked", clicked),
+               ("Score now", facts.get("current_score") or "")],
+        quote=replies, quote_label="What they wrote" if replies else "",
+        note="Nurture emails to this lead have stopped.", action=action, tone="good")
+
+
 async def send_to_sales(enrollment_id: str, cfg: dict[str, Any], who: str) -> str:
     """Email a hand-off to sales again (one click on the Hand-offs page).
     Returns the address it went to. Raises ValueError with a reason."""
@@ -136,7 +159,8 @@ async def send_to_sales(enrollment_id: str, cfg: dict[str, Any], who: str) -> st
         raise ValueError("no sales email is set (Email Nurture -> Settings, or the reply alert email)")
     summary = enrollment.get("handoff_summary") or await summarise(detail)
     subject, body = notification(detail, summary, os.environ.get("APP_PUBLIC_URL", "").rstrip("/"))
-    await alerts.send_internal(to, subject, f"{body}\n\n(Sent again by {who}.)")
+    await alerts.send_internal(to, subject, f"{body}\n\n(Sent again by {who}.)",
+                               notification_html(detail, summary, os.environ.get("APP_PUBLIC_URL", "").rstrip("/")))
     await nrepo.notified(enrollment_id, summary)
     await nrepo.log(enrollment_id, "sent_to_sales", {"to": to, "by": who})
     return to
@@ -151,8 +175,9 @@ async def notify_pending(cfg: dict[str, Any]) -> int:
             detail = await nrepo.detail(eid) or {}
             summary = await summarise(detail)
             if to:
-                subject, body = notification(detail, summary, os.environ.get("APP_PUBLIC_URL", "").rstrip("/"))
-                await alerts.send_internal(to, subject, body)
+                console = os.environ.get("APP_PUBLIC_URL", "").rstrip("/")
+                subject, body = notification(detail, summary, console)
+                await alerts.send_internal(to, subject, body, notification_html(detail, summary, console))
                 done += 1
             else:
                 summary += " (Sales was not emailed: set a sales email in Settings.)"

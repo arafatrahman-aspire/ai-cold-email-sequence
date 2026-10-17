@@ -48,6 +48,14 @@ DEFAULTS: dict[str, Any] = {
         "context_messages": 4,
         "meeting": {"slots_to_offer": 2, "days_ahead": 7, "min_notice_hours": 12},
     },
+    # How every email looks (app/mail/templates.py). The sender's name is the
+    # inbox's display name unless "name" is set here.
+    "email_style": {
+        "name": "", "title": "", "company": "Aspire Tech", "website": "", "phone": "", "address": "",
+        "sign_off": "Best,",
+        "opt_out": "Not the right time? Just reply \"no thanks\" and I won't follow up.",
+        "accent": "#2563eb", "html": True,
+    },
     # Reply triage's answer library: [{"id", "title", "text"}], written by
     # marketing; the AI reuses this wording when a reply asks the same thing.
     "triage_snippets": [],
@@ -140,6 +148,15 @@ async def step_gaps() -> list[int]:
 
 async def contactable_statuses() -> list[str]:
     return [str(x) for x in await get("contactable_lead_statuses")]
+
+
+async def email_style() -> dict[str, Any]:
+    """The email design settings over their defaults; never fails."""
+    try:
+        stored = await get("email_style")
+    except Exception:
+        stored = {}
+    return {**DEFAULTS["email_style"], **(stored if isinstance(stored, dict) else {})}
 
 
 async def triage_snippets() -> list[dict[str, Any]]:

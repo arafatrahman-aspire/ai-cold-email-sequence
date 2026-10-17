@@ -3,6 +3,7 @@ import { api } from '../../api.js'
 import { CATEGORIES, DRAFT_KINDS, relativeTime, shortDateTime } from '../../labels.js'
 import { AutoTextarea, Badge, Card, ErrorNote, Spinner, useAction } from '../ui.jsx'
 import { LeadLink } from '../LeadJourney.jsx'
+import EmailPreview from '../EmailPreview.jsx'
 
 const FILTERS = [
   ['pending,approved,failed', 'Waiting'],
@@ -146,6 +147,7 @@ export function DraftCard({ draft, now, onChanged, compact = false }) {
 
       <div className="reply-actions">
         <SendInfo draft={draft} now={now} />
+        <EmailPreview label="Preview as sent" request={() => ({ kind: 'reply', subject, body })} />
         {editable && (
           <div className="draft-buttons">
             {dirty && (

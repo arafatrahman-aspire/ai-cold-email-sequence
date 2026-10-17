@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 from app import repository as repo
 from app import settings_store
+from app.mail import templates
 from app.mail.base import Inbox, IncomingMessage, OutgoingMessage
 from app.mail.factory import get_sender
 
@@ -69,6 +70,29 @@ def build_alert(inbox: Inbox, lead: dict | None, message: IncomingMessage) -> tu
     return subject[:200], "\n".join(lines)
 
 
+def alert_html(inbox: Inbox, lead: dict | None, message: IncomingMessage) -> str:
+    """The same alert, designed."""
+    import os
+
+    lead = lead or {}
+    name = " ".join(p for p in (lead.get("first_name"), lead.get("last_name")) if p)
+    received = (message.received_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    snippet = (message.body_snippet or "").strip()
+    if len(snippet) > _SNIPPET_CHARS:
+        snippet = snippet[:_SNIPPET_CHARS].rstrip() + " …"
+    console = os.environ.get("APP_PUBLIC_URL", "").rstrip("/")
+    link = gmail_link(inbox.email, message.message_id)
+    action = (("Open in the console", f"{console}/#triage/replies") if console
+              else ("Open in Gmail", link) if link else None)
+    return templates.internal(
+        title=f"{name or message.from_email} replied",
+        intro="Their remaining cold emails have been cancelled. Reply triage is reading it now.",
+        facts=[("From", message.from_email), ("Role", " · ".join(p for p in (lead.get("job_title"), lead.get("company")) if p)),
+               ("Subject", message.subject or "(no subject)"), ("Received", f"{received:%a %d %b, %H:%M} UTC"),
+               ("Inbox", inbox.email)],
+        quote=snippet or "(no text)", quote_label="Their message", action=action, tone="good")
+
+
 async def send_reply_alert(inbox: Inbox, lead_id: str, message: IncomingMessage) -> bool:
     """Email the configured address about a new reply. Returns True if sent."""
     to = str(await settings_store.get("reply_alert_email") or "").strip()
@@ -77,7 +101,8 @@ async def send_reply_alert(inbox: Inbox, lead_id: str, message: IncomingMessage)
     try:
         lead = await repo.lead_for_step(lead_id)
         subject, body = build_alert(inbox, lead, message)
-        await get_sender().send(inbox, OutgoingMessage(to_email=to, subject=subject, body_text=body))
+        await get_sender().send(inbox, OutgoingMessage(to_email=to, subject=subject, body_text=body,
+                                                       body_html=alert_html(inbox, lead, message)))
         log.info("reply alert for lead %s sent to %s", lead_id, to)
         return True
     except Exception:

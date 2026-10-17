@@ -3,6 +3,7 @@ import { api } from '../api.js'
 import { EMAIL_STATUSES, ENROLLMENT_BADGE, enrollOutcome, formatNumber, relativeTime, shortDateTime } from '../labels.js'
 import { AutoTextarea, Badge, Card, ErrorNote, Field, Spinner, useAction } from './ui.jsx'
 import { LeadLink } from './LeadJourney.jsx'
+import EmailPreview from './EmailPreview.jsx'
 
 const PAGE = 50
 
@@ -113,6 +114,7 @@ function EmailCard({ m, onChanged }) {
           {m.status === 'failed' && <>Failed{m.last_error ? `: ${m.last_error}` : ''}</>}
           {m.status === 'cancelled' && <>Will not be sent{m.last_error ? ` (${m.last_error})` : ''}</>}
         </span>
+        <EmailPreview label="Preview as sent" request={() => ({ kind: 'cold', subject, body })} />
         {editable && dirty && (
           <div className="draft-buttons">
             <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { setSubject(m.subject); setBody(m.body) }}>Undo edits</button>

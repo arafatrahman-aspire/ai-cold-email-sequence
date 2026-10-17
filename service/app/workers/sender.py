@@ -19,6 +19,7 @@ from app import repository as repo
 from app import settings_store
 from app.config import get_settings
 from app.mail.base import Inbox, MailError, OutgoingMessage
+from app.mail import templates
 from app.mail.factory import get_sender
 from app.scheduling import (
     next_business_day_start,
@@ -60,17 +61,30 @@ class InboxPool:
         return None
 
 
+async def compose_cold(subject: str, body: str, inbox: Inbox) -> templates.Email:
+    """A cold email as sent: the body, the sign-off and signature, and a quiet
+    opt-out line; HTML too unless turned off (Settings -> Email design)."""
+    style = await settings_store.email_style()
+    mail = templates.personal(
+        body, templates.Signature.from_settings(style, inbox.display_name or ""),
+        sign_off=str(style.get("sign_off") or ""), opt_out=str(style.get("opt_out") or ""),
+        accent=templates.accent_color(style.get("accent")), subject=subject)
+    return mail if style.get("html", True) else templates.Email(mail.text, "")
+
+
 async def _send_step(
     step: dict, lead: dict, inbox: Inbox, max_attempts: int
 ) -> bool:
     """Send one step. Returns True on success."""
     s = get_settings()
     anchor_id = await repo.thread_anchor(lead["id"])
+    mail = await compose_cold(step["subject"], step["body"], inbox)
 
     message = OutgoingMessage(
         to_email=lead["email"],
         subject=step["subject"],
-        body_text=step["body"],
+        body_text=mail.text,
+        body_html=mail.html,
         # Steps 2-4 thread under the opener so they read as a follow-up rather
         # than four unrelated cold emails.
         in_reply_to=anchor_id if step["step_number"] > 1 else None,
