@@ -319,7 +319,8 @@ async def compose_answer(subject: str, body: str, inbox: Inbox) -> templates.Ema
     and the signature. No opt-out line: they wrote to us."""
     style = await settings_store.email_style()
     mail = templates.personal(body, templates.Signature.from_settings(style, inbox.display_name or ""),
-                              accent=templates.accent_color(style.get("accent")), subject=subject)
+                              accent=templates.accent_color(style.get("accent")), subject=subject,
+                              layout=templates.layout_name(style.get("layout")))
     return mail if style.get("html", True) else templates.Email(mail.text, "")
 
 

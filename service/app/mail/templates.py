@@ -36,6 +36,10 @@ def accent_color(value: Optional[str]) -> str:
     return value if value and _COLOR.match(value.strip()) else DEFAULT_ACCENT
 
 
+def layout_name(value: object) -> str:
+    return value if value in ("plain", "card") else "plain"
+
+
 def e(value: object) -> str:
     return html.escape(str(value or ""), quote=True)
 
@@ -70,10 +74,10 @@ class Signature:
     def html(self, accent: str = DEFAULT_ACCENT) -> str:
         rows = []
         if self.name:
-            rows.append(f'<div style="font-weight:600;color:{INK}">{e(self.name)}</div>')
+            rows.append(f'<div class="ink" style="font-weight:600;color:{INK}">{e(self.name)}</div>')
         role = " · ".join(e(p) for p in (self.title, self.company) if p)
         if role:
-            rows.append(f'<div style="color:{MUTED}">{role}</div>')
+            rows.append(f'<div class="soft" style="color:{MUTED}">{role}</div>')
         contact = []
         if self.phone:
             contact.append(f'<a href="tel:{e(re.sub(r"[^0-9+]", "", self.phone))}" '
@@ -83,7 +87,7 @@ class Signature:
             shown = re.sub(r"^https?://(www\.)?", "", self.website).rstrip("/")
             contact.append(f'<a href="{e(url)}" style="color:{accent};text-decoration:none">{e(shown)}</a>')
         if contact:
-            rows.append(f'<div style="color:{MUTED}">{" · ".join(contact)}</div>')
+            rows.append(f'<div class="soft" style="color:{MUTED}">{" · ".join(contact)}</div>')
         if not rows:
             return ""
         return (f'<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:20px">'
@@ -155,9 +159,13 @@ class Email:
 
 
 def personal(body: str, signature: Signature, *, sign_off: str = "", opt_out: str = "",
-             accent: str = DEFAULT_ACCENT, subject: str = "") -> Email:
+             accent: str = DEFAULT_ACCENT, subject: str = "", layout: str = "plain") -> Email:
     """``sign_off`` ("Best,") goes before the signature when the body has none;
-    ``opt_out`` is one quiet line at the very end (cold emails only)."""
+    ``opt_out`` is one quiet line at the very end (cold emails only).
+
+    ``layout``: "plain" is a bare personal email; "card" sets the same text in a
+    white card on a light page with the company name above it (still no images
+    or buttons, so it stays close to a personal email)."""
     body = (body or "").strip()
     closing = f"{sign_off}\n" if sign_off else ""
     sig_text = signature.text()
@@ -168,13 +176,35 @@ def personal(body: str, signature: Signature, *, sign_off: str = "", opt_out: st
     sign_html = f'<p style="margin:0">{e(sign_off)}</p>' if sign_off else ""
     opt_html = (f'<p class="soft" style="margin:28px 0 0;font-size:12px;line-height:1.5;color:{MUTED}">'
                 f'{e(opt_out)}</p>') if opt_out else ""
+    inner = f"{paragraphs(body, accent)}{sign_html}{signature.html(accent)}{opt_html}"
+    if layout == "card":
+        name = (f'<tr><td style="padding:0 4px 14px"><span class="ink" style="font-family:{FONT};font-size:17px;'
+                f'font-weight:700;color:{INK};letter-spacing:-0.01em">{e(signature.company)}</span></td></tr>'
+                if signature.company else "")
+        doc = f"""{_head(subject)}
+<body class="page" style="margin:0;padding:0;background:{PAGE}">
+<table role="presentation" class="page" width="100%" cellpadding="0" cellspacing="0" style="background:{PAGE}">
+<tr><td align="center" style="padding:24px 12px">
+<table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%">
+{name}<tr><td class="card" style="background:#ffffff;border-radius:10px;border-top:4px solid {accent}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr><td class="pad ink" style="padding:30px 34px;font-family:{FONT};font-size:15px;line-height:1.6;color:{INK};text-align:left">
+{inner}
+</td></tr></table>
+</td></tr></table>
+</td></tr></table>
+</body></html>"""
+        return Email(text=text, html=doc)
+
+    # The page and text colours both flip in dark mode (class "page" / "ink"):
+    # a fixed white background under light dark-mode text is unreadable.
     doc = f"""{_head(subject)}
-<body style="margin:0;padding:0;background:#ffffff">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff">
+<body class="page" style="margin:0;padding:0;background:#ffffff">
+<table role="presentation" class="page" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff">
 <tr><td style="padding:8px 16px">
 <table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%">
 <tr><td class="ink" style="font-family:{FONT};font-size:15px;line-height:1.6;color:{INK};text-align:left">
-{paragraphs(body, accent)}{sign_html}{signature.html(accent)}{opt_html}
+{inner}
 </td></tr></table>
 </td></tr></table>
 </body></html>"""

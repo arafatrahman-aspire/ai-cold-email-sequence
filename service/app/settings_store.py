@@ -55,6 +55,8 @@ DEFAULTS: dict[str, Any] = {
         "sign_off": "Best,",
         "opt_out": "Not the right time? Just reply \"no thanks\" and I won't follow up.",
         "accent": "#2563eb", "html": True,
+        # Cold emails and answers: "plain" (a bare personal email) or "card".
+        "layout": "plain",
     },
     # Reply triage's answer library: [{"id", "title", "text"}], written by
     # marketing; the AI reuses this wording when a reply asks the same thing.

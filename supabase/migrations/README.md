@@ -25,6 +25,7 @@ never altered. The single write to a shared table anywhere is setting
 | `0015_triage_tools.sql` | Reply cards: book a time, fix a lead's timezone; 1 new table (`draft_edits`) so the AI learns from edited answers |
 | `0016_nurture_tools.sql` | Nurture calendar and plain-words hand-off reasons (read only) |
 | `0017_campaigns.sql` | Campaigns: 2 new tables (`campaigns`, `campaign_leads`). Two sending functions get one extra line each, marked `-- NEW`, so a paused campaign's emails wait |
+| `0018_cascading.sql` | Deleting an enrollment now deletes all of that lead's data (emails, replies, drafts, meetings, nurture, referred contact). The suppression list is kept. No data is changed when you run it |
 
 `0017` replaces two functions first defined in `0001` and `0004`. If you ever
 re-run `0001` or `0004`, run `0017` again afterwards.

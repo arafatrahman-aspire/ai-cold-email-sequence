@@ -87,3 +87,30 @@ def test_marketing_edits_the_design_and_previews_every_kind(client, monkeypatch)
 
     store["email_style"] = {**store["email_style"], "html": False}
     assert c.post("/email-design/render", json={"kind": "cold"}).json()["html"] == ""
+
+
+def _flips_in_dark_mode(html: str) -> bool:
+    """Text colour is recoloured for dark mode through class "ink", the page
+    through class "page"; a fixed white background without "page" under light
+    dark-mode text was unreadable."""
+    return 'class="ink"' in html and 'class="page"' in html and ".page {" in html.replace("{{", "{")
+
+
+def test_personal_email_background_follows_dark_mode():
+    sig = templates.Signature(name="Alex Rivera", title="Sales", company="Aspire Tech")
+    for layout in ("plain", "card"):
+        mail = templates.personal("Hi Dana,\n\nHello.", sig, sign_off="Best,", opt_out="No thanks?", layout=layout)
+        assert _flips_in_dark_mode(mail.html), layout
+        # The signature's own colours are recolourable too, not fixed inline.
+        assert 'class="ink" style="font-weight:600' in mail.html and 'class="soft"' in mail.html
+
+
+def test_card_layout_wraps_the_same_text_without_images_or_buttons():
+    sig = templates.Signature(name="Alex Rivera", company="Aspire Tech")
+    plain = templates.personal("Hi Dana,\n\nSee https://x.com/a.", sig, sign_off="Best,", accent="#d97706")
+    card = templates.personal("Hi Dana,\n\nSee https://x.com/a.", sig, sign_off="Best,", accent="#d97706", layout="card")
+    assert plain.text == card.text  # the plain-text part never changes
+    assert 'class="card"' in card.html and "border-top:4px solid #d97706" in card.html
+    assert "Aspire Tech" in card.html and 'class="card"' not in plain.html
+    assert "<img" not in card.html and "background:#d97706" not in card.html  # no logo, no button
+    assert templates.layout_name("card") == "card" and templates.layout_name("fancy") == "plain" == templates.layout_name(None)

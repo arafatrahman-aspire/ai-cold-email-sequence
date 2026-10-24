@@ -13,7 +13,7 @@ const KINDS = [
 ]
 
 const WHY = {
-  cold: 'Looks like a personal email from a person: clean type and a proper signature, no banner or images. Designed cold email lands in Promotions and gets fewer replies.',
+  cold: 'Plain: a personal email with a proper signature, no banner or images. Card: the same text in a white card with your company name above it. Heavily designed cold email lands in Promotions and gets fewer replies, so neither has images or buttons.',
   reply: 'Same personal look, without the opt-out line (they wrote to us).',
   nurture: 'The branded layout: logo, card, one clear button, address and unsubscribe in the footer.',
   handoff: 'What sales receives: why the lead is ready, the facts, and a button to the lead.',
@@ -79,6 +79,12 @@ export default function EmailDesign() {
                 <input value={style.address} onChange={set('address')} />
               </Field>
               <div className="campaign-row">
+                <Field label="Layout (cold emails and answers)" hint="Plain: a bare personal email. Card: the same text in a white card with your company name above it.">
+                  <select value={style.layout || 'plain'} onChange={set('layout')}>
+                    <option value="plain">Plain, like a personal email</option>
+                    <option value="card">Card, more designed</option>
+                  </select>
+                </Field>
                 <Field label="Sign-off (cold emails)"><input value={style.sign_off} onChange={set('sign_off')} placeholder="Best," /></Field>
               </div>
               <Field label="Opt-out line (cold emails)" hint="One quiet line under the signature. Empty: none (the unsubscribe header is always sent).">

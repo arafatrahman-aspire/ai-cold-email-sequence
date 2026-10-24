@@ -68,7 +68,8 @@ async def compose_cold(subject: str, body: str, inbox: Inbox) -> templates.Email
     mail = templates.personal(
         body, templates.Signature.from_settings(style, inbox.display_name or ""),
         sign_off=str(style.get("sign_off") or ""), opt_out=str(style.get("opt_out") or ""),
-        accent=templates.accent_color(style.get("accent")), subject=subject)
+        accent=templates.accent_color(style.get("accent")), subject=subject,
+        layout=templates.layout_name(style.get("layout")))
     return mail if style.get("html", True) else templates.Email(mail.text, "")
 
 

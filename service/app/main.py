@@ -351,6 +351,7 @@ class EmailStyle(BaseModel):
     opt_out: str = Field(default="", max_length=200)
     accent: str = Field(default="#2563eb", pattern=r"^#[0-9a-fA-F]{6}$")
     html: bool = True
+    layout: str = Field(default="plain", pattern="^(plain|card)$")
 
 
 class RenderRequest(BaseModel):
