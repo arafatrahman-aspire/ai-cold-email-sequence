@@ -22,6 +22,7 @@ from app.nurture.checks import Draft
 from app.nurture.render import render
 from app.scheduling import within_business_hours
 from app import settings_store
+from app.calendar.factory import booking_link as calendar_booking_link
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
@@ -147,7 +148,7 @@ async def _send_one(m: dict[str, Any], cfg: dict[str, Any], ctx: dict[str, Any],
         Draft(m["subject"] or "", m["preheader"] or "", m["body"] or "", m.get("resource_id"), "demo"),
         message_id=mid, first_name=m.get("first_name"), resource=resource, branding=cfg["branding"],
         public_url=ctx["public"], unsubscribe_url=unsubscribe_url,
-        demo_fallback=get_settings().calcom_booking_url, style=ctx.get("style"),
+        demo_fallback=calendar_booking_link(), style=ctx.get("style"),
     )
     if rendered.problems:
         # e.g. its resource was deleted: cancelled, and the next write tick writes it again.

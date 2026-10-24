@@ -1,7 +1,7 @@
 """Calendar providers: a contract every provider must meet, Cal.com's exact
 API usage (against a mocked HTTP layer), and slot selection.
 
-A new provider (Google, Microsoft) is checked by adding it to PROVIDERS.
+A new provider (Google) is checked by adding it to PROVIDERS.
 """
 
 import json
@@ -13,6 +13,7 @@ import pytest
 from app.calendar.base import Attendee, CalendarError, Slot
 from app.calendar.calcom import CalComProvider
 from app.calendar.fake import FakeCalendar
+from app.calendar.msbookings import MSBookingsProvider, discover, parse_duration
 from app.calendar.slots import describe_slot, find_slot, pick_near, pick_slots
 from app.settings_store import BusinessHours
 
@@ -82,9 +83,102 @@ def calcom(server=None):
     return provider, server
 
 
+# --- a mocked Microsoft Graph (Bookings) ------------------------------------------
+
+BIZ = "Sales@contoso.onmicrosoft.com"
+SERVICE = "svc-1"
+
+
+class FakeGraph:
+    """Answers the Bookings endpoints the way Graph does. Every staff member
+    works 10:00-11:00 and 14:00-14:30 UTC on weekdays; their appointments
+    are busy. Like Graph, appointments are not checked for clashes."""
+
+    def __init__(self, staff=("s1",)):
+        self.staff = list(staff)
+        self.requests: list[httpx.Request] = []
+        self.appointments: list[dict] = []
+        self.tokens = 0
+
+    @staticmethod
+    def _t(data):
+        return datetime.fromisoformat(data["dateTime"]).replace(tzinfo=timezone.utc)
+
+    def _free(self, sid, start, end):
+        out = []
+        day = start.replace(hour=0, minute=0, second=0)
+        while day < end:
+            if day.weekday() < 5:
+                for a, b in ((10, 11), (14, 14.5)):
+                    windows = [(day + timedelta(hours=a), day + timedelta(hours=b))]
+                    for appt in self.appointments:
+                        if sid in appt["staffMemberIds"]:
+                            s, e = self._t(appt["start"]), self._t(appt["end"])
+                            windows = [w for ws, we in windows for w in
+                                       ((ws, min(we, s)), (max(ws, e), we)) if w[1] > w[0]]
+                    out += [(max(ws, start), min(we, end)) for ws, we in windows if we > start and ws < end]
+            day += timedelta(days=1)
+        return [{"status": "available", "serviceId": "",
+                 "startDateTime": {"dateTime": s.replace(tzinfo=None).isoformat(), "timeZone": "UTC"},
+                 "endDateTime": {"dateTime": e.replace(tzinfo=None).isoformat(), "timeZone": "UTC"}}
+                for s, e in out]
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        path = request.url.path
+        if request.url.host == "login.microsoftonline.com":
+            self.tokens += 1
+            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+        assert request.headers["Authorization"] == "Bearer tok"
+        base = f"/v1.0/solutions/bookingBusinesses/{BIZ}"
+        if path == "/v1.0/solutions/bookingBusinesses":
+            return httpx.Response(200, json={"value": [{"id": BIZ, "displayName": "Sales",
+                                                        "publicUrl": "https://outlook.office365.com/book/Sales@contoso.onmicrosoft.com/"}]})
+        if path == f"{base}/services/{SERVICE}":
+            return httpx.Response(200, json={
+                "id": SERVICE, "displayName": "Intro call", "defaultDuration": "PT30M",
+                "preBuffer": "PT0S", "postBuffer": "PT0S", "isLocationOnline": True,
+                "staffMemberIds": self.staff, "webUrl": "https://outlook.office365.com/book/Sales/s/svc-1",
+                "schedulingPolicy": {"timeSlotInterval": "PT30M", "minimumLeadTime": "PT0S",
+                                     "maximumAdvance": "P365D"}})
+        if path == f"{base}/services":
+            return httpx.Response(200, json={"value": [{"id": SERVICE, "displayName": "Intro call",
+                                                        "defaultDuration": "PT30M", "staffMemberIds": self.staff}]})
+        if path == f"{base}/staffMembers":
+            return httpx.Response(200, json={"value": [
+                {"id": s, "displayName": f"Staff {s}", "emailAddress": f"{s}@contoso.com", "role": "member"}
+                for s in self.staff]})
+        if path == f"{base}/getStaffAvailability":
+            body = json.loads(request.content)
+            start, end = self._t(body["startDateTime"]), self._t(body["endDateTime"])
+            return httpx.Response(200, json={"value": [
+                {"staffId": s, "availabilityItems": self._free(s, start, end)} for s in body["staffIds"]]})
+        if path == f"{base}/appointments" and request.method == "POST":
+            body = json.loads(request.content)
+            appt = {**body, "id": f"appt-{len(self.appointments) + 1}",
+                    "createdDateTime": f"2026-10-01T00:00:{len(self.appointments):02d}Z",
+                    "joinWebUrl": "https://teams.microsoft.com/l/meetup-join/x"}
+            self.appointments.append(appt)
+            return httpx.Response(201, json=appt)
+        if path == f"{base}/calendarView":
+            start = datetime.fromisoformat(request.url.params["start"].replace("Z", "+00:00"))
+            end = datetime.fromisoformat(request.url.params["end"].replace("Z", "+00:00"))
+            return httpx.Response(200, json={"value": [
+                a for a in self.appointments if start <= self._t(a["start"]) < end]})
+        return httpx.Response(404, json={"error": {"code": "NotFound", "message": path}})
+
+
+def msbookings(server=None, **kwargs):
+    server = server or FakeGraph()
+    provider = MSBookingsProvider("tenant", "client", "secret", BIZ, SERVICE,
+                                  transport=httpx.MockTransport(server), **kwargs)
+    return provider, server
+
+
 PROVIDERS = {
     "fake": lambda: FakeCalendar("UTC", "https://cal.example.com/demo"),
     "calcom": lambda: calcom()[0],
+    "microsoft": lambda: msbookings()[0],
 }
 
 
@@ -265,3 +359,79 @@ def test_pick_near_prefers_the_same_day_and_closest_time():
     wanted = MON + timedelta(hours=17)
     near = pick_near(slots, wanted, "UTC", HOURS, MON - timedelta(days=1), count=2, min_notice_hours=0)
     assert [s.start.hour for s in near] == [14, 15]
+
+
+# --- Microsoft Bookings specifics ---------------------------------------------------
+
+@pytest.mark.anyio
+async def test_msbookings_round_robin_fills_a_slot_once_per_staff_member():
+    cal, server = msbookings(FakeGraph(staff=("s1", "s2", "s3", "s4")))
+    [first, *_] = await cal.free_slots(MON, MON + timedelta(days=1))
+    assert first.start == MON + timedelta(hours=10) and first.end - first.start == timedelta(minutes=30)
+
+    # Four leads can take the same time, one per staff member, in order.
+    for i in range(4):
+        await cal.book(first.start, Attendee(f"Lead {i}", f"lead{i}@x.com", "UTC"))
+    assert [a["staffMemberIds"] for a in server.appointments] == [["s1"], ["s2"], ["s3"], ["s4"]]
+    assert first.start not in [s.start for s in await cal.free_slots(MON, MON + timedelta(days=1))]
+    with pytest.raises(CalendarError) as err:
+        await cal.book(first.start, DANA)
+    assert err.value.slot_taken
+
+    # The rotation carries on from the last assignment, even in a new process
+    # (it is read back from the bookings), and skips whoever is busy.
+    fresh, _ = msbookings(server)
+    await fresh.book(MON + timedelta(hours=10, minutes=30), DANA)
+    assert server.appointments[-1]["staffMemberIds"] == ["s1"]
+    await fresh.book(MON + timedelta(hours=10, minutes=30), DANA)
+    assert server.appointments[-1]["staffMemberIds"] == ["s2"]
+
+
+@pytest.mark.anyio
+async def test_msbookings_requests_match_the_api():
+    cal, server = msbookings(staff_ids=["s1"])
+    booking = await cal.book(MON + timedelta(hours=14), DANA, "Booked from a reply")
+    assert booking.meeting_url.startswith("https://teams.microsoft.com/")
+    assert booking.end - booking.start == timedelta(minutes=30)
+
+    post = next(r for r in server.requests if r.url.path.endswith("/appointments"))
+    body = json.loads(post.content)
+    assert body["serviceId"] == SERVICE and body["staffMemberIds"] == ["s1"]
+    assert body["start"] == {"dateTime": "2026-10-05T14:00:00", "timeZone": "UTC"}
+    assert body["isLocationOnline"] is True
+    [customer] = body["customers"]
+    assert (customer["name"], customer["emailAddress"], customer["timeZone"]) == (DANA.name, DANA.email, DANA.timezone)
+    assert server.tokens == 1  # the token is reused
+    assert cal.booking_link() == "https://outlook.office365.com/book/Sales/s/svc-1"
+    assert msbookings(booking_url="https://book.example.com")[0].booking_link() == "https://book.example.com"
+
+
+@pytest.mark.anyio
+async def test_msbookings_errors_are_calendar_errors():
+    def forbidden(request):
+        if request.url.host == "login.microsoftonline.com":
+            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+        return httpx.Response(403, json={"error": {"code": "ErrorAccessDenied", "message": "Access is denied."}})
+
+    cal = MSBookingsProvider("t", "c", "s", BIZ, SERVICE, transport=httpx.MockTransport(forbidden))
+    with pytest.raises(CalendarError, match="Bookings.Read.All"):
+        await cal.free_slots(MON, MON + timedelta(days=1))
+    with pytest.raises(CalendarError, match="MSBOOKINGS_BUSINESS_ID"):
+        MSBookingsProvider("t", "c", "s", "", "")
+    with pytest.raises(CalendarError, match="GRAPH_TENANT_ID"):
+        MSBookingsProvider("", "", "", BIZ, SERVICE)
+
+
+@pytest.mark.anyio
+async def test_msbookings_discover_lists_businesses_services_and_staff():
+    server = FakeGraph(staff=("s1", "s2"))
+    [biz] = await discover("t", "c", "s", transport=httpx.MockTransport(server))
+    assert biz["business_id"] == BIZ
+    assert biz["services"][0]["id"] == SERVICE and biz["services"][0]["staff_ids"] == ["s1", "s2"]
+    assert [m["email"] for m in biz["staff"]] == ["s1@contoso.com", "s2@contoso.com"]
+
+
+def test_iso_durations():
+    assert parse_duration("PT30M") == timedelta(minutes=30)
+    assert parse_duration("P1DT2H") == timedelta(days=1, hours=2)
+    assert parse_duration("PT0S") == timedelta(0) == parse_duration(None) == parse_duration("junk")

@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from app.auth import is_admin
 from app import repository as repo
+from app.calendar.factory import booking_link as calendar_booking_link
 from app.config import get_settings
 from app.llm.factory import get_gateway
 from app.nurture import checks, content, enroll, exits, jobs, options, replies, schedule, sending
@@ -81,7 +82,7 @@ async def handle_click(message_id: str, link: str, user_agent: str) -> Optional[
         return (r or {}).get("url") or None
     branding = cfg["branding"]
     if link == "demo":
-        return branding.get("demo_url") or get_settings().calcom_booking_url or None
+        return branding.get("demo_url") or calendar_booking_link() or None
     return branding.get("pricing_url") or None
 
 

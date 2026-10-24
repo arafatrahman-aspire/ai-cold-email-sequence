@@ -44,7 +44,7 @@ function CalendarCard() {
   }, [])
 
   return (
-    <Card title="Calendar" subtitle="Where meeting times come from and bookings go. Set CALENDAR_PROVIDER in .env (calcom, fake or none).">
+    <Card title="Calendar" subtitle="Where meeting times come from and bookings go. Set CALENDAR_PROVIDER in .env (calcom, microsoft, fake or none).">
       {status && (
         <div className="note">
           <Badge tone={status.ready ? 'good' : status.error ? 'critical' : 'neutral'}>

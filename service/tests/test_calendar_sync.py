@@ -59,3 +59,32 @@ async def test_no_calendar_or_a_broken_one_is_harmless(synced, monkeypatch):
     monkeypatch.setattr(calendar_sync, "get_calendar", broken)
     assert await calendar_sync.run_once(now=NOW) == {"error": "Cal.com needs CALCOM_API_KEY"}
     assert not synced and calendar_sync.last_run["error"]
+
+
+@pytest.mark.anyio
+async def test_a_deleted_booking_is_cancelled_when_the_provider_deletes_them(synced, monkeypatch):
+    """Microsoft Bookings deletes a cancelled appointment instead of listing it."""
+
+    class Deleting(FakeCalendar):
+        name = "microsoft"
+        missing_means_cancelled = True
+
+    cal = Deleting("UTC")
+    use_calendar(cal)
+    slot = (await cal.free_slots(NOW, NOW + timedelta(days=2)))[0]
+    kept = await cal.book(slot.start, Attendee("Lea", "lead@x.com", "UTC"))
+    future = (NOW + timedelta(days=1)).isoformat()
+
+    async def overview(limit):
+        return [
+            {"provider": "microsoft", "external_id": kept.external_id, "status": "booked", "start_at": future},
+            {"provider": "microsoft", "external_id": "gone", "status": "booked", "start_at": future,
+             "end_at": future, "attendee_email": "lead@x.com", "attendee_name": "Lea"},
+            {"provider": "microsoft", "external_id": "old", "status": "cancelled", "start_at": future},
+            {"provider": "calcom", "external_id": "other", "status": "booked", "start_at": future},
+        ]
+
+    monkeypatch.setattr(repo, "meetings_overview", overview)
+    await calendar_sync.run_once(now=NOW)
+    cancelled = [c for c in synced if c[4] == "cancelled"]
+    assert [c[1] for c in cancelled] == ["gone"]

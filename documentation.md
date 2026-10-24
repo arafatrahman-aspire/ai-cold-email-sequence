@@ -508,16 +508,17 @@ arrived at, in the same thread.
 
 ### C3.5 Meetings booked through the link
 
-Every 5 minutes the calendar sync reads Cal.com's bookings. A booking by one of
-your leads (or anyone, for the event type in `CALCOM_EVENT_TYPE_ID`) appears on
+Every 5 minutes the calendar sync reads the calendar's bookings. A booking by one
+of your leads (or anyone, for the Cal.com event type or Bookings service) appears on
 the Meetings page, stops that lead's sequence and cancels unsent replies. A
 cancellation puts the lead back to "replied".
 
 ### C3.6 Calendar providers
 
 `app/calendar/base.py` defines the interface (free slots, book, booking link).
-Cal.com and a fake in-memory calendar are implemented. Adding Google or
-Microsoft is one new class plus one line in `app/calendar/factory.py`;
+Cal.com, Microsoft Bookings (round robin over the service's staff) and a fake
+in-memory calendar are implemented; `CALENDAR_PROVIDER` picks one and nothing
+outside `app/calendar/` knows which. Adding Google is one new class plus one line in `app/calendar/factory.py`;
 `tests/test_calendar.py` runs the same contract tests against it.
 
 ### C3.7 Accuracy
@@ -532,11 +533,16 @@ through the classifier (target 95%). From the command line:
 
 | Variable | Purpose |
 |---|---|
-| `CALENDAR_PROVIDER` | `calcom`, `fake` (for testing) or `none` (drafts ask the lead for times) |
+| `CALENDAR_PROVIDER` | `calcom`, `microsoft`, `fake` (for testing) or `none` (drafts ask the lead for times) |
 | `CALCOM_API_KEY` | Cal.com API key |
 | `CALCOM_EVENT_TYPE_ID` | The event type's number, or its slug (a slug also needs the username) |
 | `CALCOM_BOOKING_URL` | Public booking page put in emails, e.g. `https://cal.com/you/30min` |
 | `CALCOM_USERNAME` | Only for a slug when `CALCOM_BOOKING_URL` is not set |
+| `MSBOOKINGS_BUSINESS_ID` | Microsoft Bookings page id (its mailbox address); signs in with `GRAPH_*` |
+| `MSBOOKINGS_SERVICE_ID` | The Bookings service leads book |
+| `MSBOOKINGS_STAFF_IDS` | Optional round-robin order; empty = the service's staff |
+| `MSBOOKINGS_BOOKING_URL` | Optional link for emails; empty = the service's Bookings page |
+| `MSBOOKINGS_TIMEZONE` | The booking page's IANA timezone |
 | `TRIAGE_INTERVAL_SECONDS` | Triage worker (60) |
 | `CALENDAR_SYNC_INTERVAL_SECONDS` | Calendar sync (300) |
 
@@ -586,7 +592,7 @@ through the classifier (target 95%). From the command line:
 service/app/
   triage/            classify.py, plan.py (pure rules), drafting.py, conversation.py,
                      graph.py, evaluate.py, testset.jsonl
-  calendar/          base.py, calcom.py, fake.py, factory.py, slots.py
+  calendar/          base.py, calcom.py, msbookings.py, fake.py, factory.py, slots.py
   workers/           triage.py, calendar_sync.py
 frontend/src/components/triage/
   TriageReplies.jsx, Drafts.jsx, Meetings.jsx, Accuracy.jsx, TriageSettings.jsx

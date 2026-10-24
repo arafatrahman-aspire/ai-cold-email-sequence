@@ -53,6 +53,9 @@ async def run_once(now: Optional[datetime] = None) -> dict[str, Any]:
             outcome = "failed"
         stats[outcome] = stats.get(outcome, 0) + 1
 
+    if bookings is not None and calendar.missing_means_cancelled:
+        await _cancel_missing(calendar.name, {b.external_id for b in bookings}, now, stats)
+
     last_run.clear()
     last_run.update({
         "at": now.isoformat(),
@@ -63,3 +66,32 @@ async def run_once(now: Optional[datetime] = None) -> dict[str, Any]:
     if stats.get("new") or stats.get("cancelled") or stats.get("updated") or stats.get("failed"):
         log.info("calendar sync: %s", stats)
     return stats
+
+
+async def _cancel_missing(provider: str, seen: set[str], now: datetime, stats: dict[str, Any]) -> None:
+    """A provider that deletes cancelled bookings (Microsoft Bookings): a
+    meeting we hold as booked, inside the window just read, that the
+    calendar no longer lists was cancelled."""
+    try:
+        known = await repo.meetings_overview(500)
+    except Exception as exc:
+        log.warning("calendar sync: could not read meetings to find cancellations: %s", exc)
+        return
+    for m in known:
+        start = m.get("start_at")
+        if isinstance(start, str):
+            start = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        if (m.get("provider") != provider or m.get("status") not in ("booked", "pending")
+                or m.get("external_id") in seen or start is None or start < now - LOOKBACK):
+            continue
+        try:
+            result = await repo.sync_meeting(
+                provider, m["external_id"], start, m.get("end_at"), "cancelled",
+                m.get("attendee_email"), m.get("attendee_name"), None, True,
+            )
+            outcome = result.get("outcome") or "unknown"
+            log.info("calendar sync: booking %s is gone from %s, marked cancelled", m["external_id"], provider)
+        except Exception as exc:
+            log.warning("calendar sync: cancelling booking %s failed: %s", m.get("external_id"), exc)
+            outcome = "failed"
+        stats[outcome] = stats.get(outcome, 0) + 1

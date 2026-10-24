@@ -390,13 +390,15 @@ The number is "Earlier emails the AI reads" in Reply triage → Settings.
    and `0008_meeting_sync.sql`, in the Supabase SQL Editor. (`0009_lead_browser.sql`
    adds the lead list on the Enroll page.)
 2. In `.env`, set `CALENDAR_PROVIDER=calcom` with `CALCOM_API_KEY`,
-   `CALCOM_EVENT_TYPE_ID` and `CALCOM_BOOKING_URL` (or `fake` to try it
-   without Cal.com), then restart the backend.
+   `CALCOM_EVENT_TYPE_ID` and `CALCOM_BOOKING_URL`, or
+   `CALENDAR_PROVIDER=microsoft` with the `GRAPH_*` and `MSBOOKINGS_*` settings
+   (Microsoft Bookings, round robin; setup in runbook C1.1), or `fake` to try
+   it without either, then restart the backend.
 3. Check it under **Reply triage → Settings → Calendar → Check free times**.
 
 **Meetings booked through the link**: every 5 minutes the calendar sync
-reads Cal.com's bookings. A booking by one of your leads (or anyone, for the
-event type in `CALCOM_EVENT_TYPE_ID`) appears on the Meetings page, stops
+reads the calendar's bookings. A booking by one of your leads (or anyone, for
+the Cal.com event type or Bookings service offered) appears on the Meetings page, stops
 that lead's sequence and cancels unsent replies; a cancellation puts the lead
 back to "replied". **Check calendar now** on the Meetings page runs it at once.
 
@@ -409,8 +411,8 @@ plain template.
 the command line: `cd service && python -m app.triage.evaluate`.
 
 **Calendar providers** are swappable: `app/calendar/base.py` defines the
-interface (free slots, book, booking link). Cal.com and a fake calendar are
-implemented; adding Google or Microsoft is one new class plus one line in
+interface (free slots, book, booking link). Cal.com, Microsoft Bookings and a
+fake calendar are implemented; adding Google is one new class plus one line in
 `app/calendar/factory.py`, and `tests/test_calendar.py` runs the same
 contract tests against it.
 

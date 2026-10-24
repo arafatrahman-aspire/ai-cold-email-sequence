@@ -56,7 +56,7 @@ function SyncNote({ sync, calendar }) {
         <Badge tone="warning">No calendar</Badge>
         <span>
           {calendar.error ||
-            'CALENDAR_PROVIDER is "none": meetings cannot be booked or read. Set it to calcom in .env.'}
+            'CALENDAR_PROVIDER is "none": meetings cannot be booked or read. Set it to calcom or microsoft in .env.'}
         </span>
       </div>
     )

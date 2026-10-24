@@ -1019,3 +1019,33 @@ async def calendar_slots(timezone_name: str = "UTC", days: int = 7) -> dict:
         "free": [s.to_json() for s in free[:20]],
         "would_offer": [describe_slot(s, timezone_name) for s in offer],
     }
+
+
+@app.get("/calendar/microsoft/discover", dependencies=[Depends(require_admin)])
+async def calendar_microsoft_discover() -> dict:
+    """Setup help: every Bookings business the Graph app can see, with its
+    services and staff, i.e. the values for MSBOOKINGS_BUSINESS_ID,
+    MSBOOKINGS_SERVICE_ID and MSBOOKINGS_STAFF_IDS. Works before those are set."""
+    from app.calendar.msbookings import discover
+
+    s = get_settings()
+    try:
+        return {"businesses": await discover(s.graph_tenant_id, s.graph_client_id, s.graph_client_secret)}
+    except CalendarError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.get("/calendar/microsoft/check", dependencies=[Depends(require_admin)])
+async def calendar_microsoft_check() -> dict:
+    """Setup check for CALENDAR_PROVIDER=microsoft: the service, the
+    round-robin team and the booking page, as the service will use them."""
+    try:
+        cal = get_calendar()
+    except CalendarError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    if cal is None or cal.name != "microsoft":
+        raise HTTPException(status_code=400, detail="CALENDAR_PROVIDER is not microsoft")
+    try:
+        return await cal.describe()
+    except CalendarError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))

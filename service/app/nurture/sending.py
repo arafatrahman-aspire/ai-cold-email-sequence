@@ -15,6 +15,7 @@ import os
 from typing import Any, Optional
 
 from app import repository as repo
+from app.calendar.factory import booking_link as calendar_booking_link
 from app.config import get_settings
 from app.mail.base import Inbox, MailSender
 from app.mail.brevo_sender import BrevoSender
@@ -90,8 +91,8 @@ async def problems(cfg: dict[str, Any]) -> list[str]:
     if not public_url():
         out.append("NURTURE_PUBLIC_URL (or APP_PUBLIC_URL) is not set: links and unsubscribe need it")
     branding = cfg["branding"]
-    if not (branding.get("demo_url") or get_settings().calcom_booking_url):
-        out.append("No demo link: set Settings -> Branding -> demo URL (or CALCOM_BOOKING_URL)")
+    if not (branding.get("demo_url") or calendar_booking_link()):
+        out.append("No demo link: set Settings -> Branding -> demo URL (or the calendar's booking link)")
     if not branding.get("pricing_url"):
         out.append("No pricing link: set Settings -> Branding -> pricing URL")
     if not await reply_to():

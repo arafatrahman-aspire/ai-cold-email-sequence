@@ -56,7 +56,8 @@ The examples in every part use this `api` helper.
     that, not the normal password. IMAP must be enabled in Gmail settings.
 - **Docker** (for the backend) and **Node.js 20+** (for the console)
 - Access to the **CMS** `.env` (for login)
-- For Reply Triage meetings: a **Cal.com** account and API key (optional)
+- For Reply Triage meetings (optional): a **Cal.com** account and API key, or
+  **Microsoft Bookings** (Microsoft 365) and an Entra app registration
 
 ### A1.2 Database (one time)
 
@@ -532,14 +533,62 @@ cancel every unsent email for them.
    `0008_meeting_sync.sql` (part of [A1.2](#a12-database-one-time)).
 2. In `.env`, for meeting booking:
    ```dotenv
-   CALENDAR_PROVIDER=calcom            # or fake to try it without Cal.com, none to skip
+   CALENDAR_PROVIDER=calcom            # or microsoft; fake to try it, none to skip
    CALCOM_API_KEY=...
    CALCOM_EVENT_TYPE_ID=1234567        # or the slug, e.g. 30min
    CALCOM_BOOKING_URL=https://cal.com/you/30min
    ```
-   Restart the backend.
+   For Microsoft Bookings see [C1.1](#c11-microsoft-bookings-round-robin).
+   Switching between the two is only `CALENDAR_PROVIDER`; restart the backend.
 3. **Reply triage → Settings → Calendar → Check free times**: you should see the
    next free slots.
+
+### C1.1 Microsoft Bookings (round robin)
+
+One Bookings *service* is offered and served by a team in turn: a time is
+offered while at least one staff member is free (four staff: up to four leads
+in the same slot), and each booking goes to the next free staff member after
+the last one assigned. Bookings sends the invite and the Teams link.
+
+1. **Bookings page and service** (Microsoft 365, as a Bookings admin):
+   [outlook.office.com/bookings](https://outlook.office.com/bookings) → create
+   (or open) the booking page → **Services** → add the service (e.g. "30 min
+   intro call", online meeting on) and assign the four staff members. Set each
+   member's availability under **Staff**, and the page's business hours and
+   timezone. Publish the page.
+2. **Entra app** ([entra.microsoft.com](https://entra.microsoft.com), as a
+   Global / Application administrator) → **App registrations → New
+   registration** (single tenant, no redirect URI). From its **Overview** copy
+   *Directory (tenant) ID* → `GRAPH_TENANT_ID` and *Application (client) ID* →
+   `GRAPH_CLIENT_ID`. **Certificates & secrets → New client secret** → copy
+   the *Value* (shown once) → `GRAPH_CLIENT_SECRET`. The same app can be the
+   one used for Graph mail.
+3. **API permissions → Add a permission → Microsoft Graph → Application
+   permissions**: `Bookings.Read.All` and `BookingsAppointment.ReadWrite.All`
+   → **Grant admin consent**.
+4. `.env`:
+   ```dotenv
+   CALENDAR_PROVIDER=microsoft
+   GRAPH_TENANT_ID=...
+   GRAPH_CLIENT_ID=...
+   GRAPH_CLIENT_SECRET=...
+   MSBOOKINGS_BUSINESS_ID=Sales@yourco.onmicrosoft.com   # the booking page's mailbox
+   MSBOOKINGS_SERVICE_ID=...                             # from step 5
+   MSBOOKINGS_STAFF_IDS=                                 # optional: rotation order
+   MSBOOKINGS_BOOKING_URL=                               # optional: link for emails
+   MSBOOKINGS_TIMEZONE=Asia/Dhaka                        # the page's timezone
+   ```
+5. Restart, sign in to the console as an admin and open
+   `/api/calendar/microsoft/discover`: it lists every booking page the app can
+   see with its id, services (ids, staff) and staff (ids, emails). Copy the
+   service id into `MSBOOKINGS_SERVICE_ID`, restart, then open
+   `/api/calendar/microsoft/check`: it shows the service, the round-robin team
+   and the booking link exactly as they will be used.
+
+Notes: Graph itself does not refuse a double booking, so the service checks
+the slot just before booking; a cancelled Bookings appointment is deleted
+rather than marked, so the calendar sync marks a meeting it no longer finds as
+cancelled.
 
 Triage itself needs nothing else: it uses the same LLM and inboxes as the cold sequence.
 
@@ -638,8 +687,8 @@ api -X PUT localhost:8080/settings/triage -d '{"value":{
 
 | Symptom | Cause and fix |
 |---|---|
-| "No calendar" note | `CALENDAR_PROVIDER` is `none` or Cal.com settings are wrong; the note says which |
-| "Calendar check failed" | The Cal.com API key or event type is wrong, or Cal.com is down; the reason is shown |
+| "No calendar" note | `CALENDAR_PROVIDER` is `none` or the calendar settings are wrong; the note says which |
+| "Calendar check failed" | The Cal.com key / event type, or the Graph app / Bookings ids or permissions, are wrong, or the service is down; the reason is shown |
 | A lead booked through the link but it is missing | Press **Check calendar now**. Bookings for other event types only appear when the attendee's address is one of your leads |
 | Error mentioning `meetings_overview` | Run `0008_meeting_sync.sql` |
 | Interested replies get no times offered | No free slots in `days_ahead` inside the lead's business hours, or no calendar; the draft then asks the lead for times |
@@ -653,7 +702,7 @@ api -X PUT localhost:8080/settings/triage -d '{"value":{
   api -X PUT localhost:8080/settings/triage -d '{"value":{"enabled":false}}'
   ```
 - **One bad draft**: **Drafts** → **Reject**.
-- **Wrong booking**: cancel it in Cal.com; the next calendar sync marks it
+- **Wrong booking**: cancel it in Cal.com or Bookings; the next calendar sync marks it
   cancelled and puts the lead back to "replied".
 
 <!-- ======================================================================= -->
@@ -676,7 +725,7 @@ api -X PUT localhost:8080/settings/triage -d '{"value":{
 
    Restart the backend.
 3. **Email Nurture → Settings → Branding and links**: pricing link, demo link
-   (or `CALCOM_BOOKING_URL` is used), company address, sales email.
+   (or the calendar's booking link is used), company address, sales email.
 4. **Dashboard**: the red **Not sending** box should be gone.
 
 ## D2. First run (test mode)

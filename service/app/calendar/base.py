@@ -3,9 +3,10 @@
 Reply triage needs four things from a calendar: free slots in a window, a
 way to book one of them for a lead, an optional public booking link the lead
 can use instead, and the bookings themselves, so a meeting booked through
-that link is recorded too. Each provider (Cal.com today; Google Calendar or
-Microsoft Graph later) implements this class, and ``CALENDAR_PROVIDER``
-picks one, the same way ``LLM_PROVIDER`` and ``MAIL_SENDER`` do.
+that link is recorded too. Each provider (Cal.com, Microsoft Bookings; Google
+Calendar later) implements this class, and ``CALENDAR_PROVIDER`` picks one,
+the same way ``LLM_PROVIDER`` and ``MAIL_SENDER`` do. Nothing outside
+app/calendar/ knows which provider is in use.
 
 To add a provider: subclass ``CalendarProvider`` in a new module, then add
 one branch to ``app.calendar.factory._build``. Nothing else changes; the
@@ -76,6 +77,9 @@ class RemoteBooking:
 
 class CalendarProvider(abc.ABC):
     name: str
+    # True when the provider deletes a cancelled booking instead of listing it
+    # as cancelled: the calendar sync then cancels known meetings it no longer sees.
+    missing_means_cancelled: bool = False
 
     @abc.abstractmethod
     async def free_slots(self, start: datetime, end: datetime) -> list[Slot]:

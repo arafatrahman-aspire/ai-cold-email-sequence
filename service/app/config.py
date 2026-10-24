@@ -92,9 +92,10 @@ class Settings(BaseSettings):
     reply_to: str = ""
 
     # --- Calendar (meeting booking for reply triage) -----------------------
-    # "calcom" books through Cal.com; "fake" is an in-memory calendar for
-    # testing; "none" offers no slots (drafts ask the lead for times).
-    # Google / Microsoft slot in as further providers (app/calendar/).
+    # "calcom" books through Cal.com; "microsoft" through Microsoft Bookings
+    # (round robin over the service's staff); "fake" is an in-memory calendar
+    # for testing; "none" offers no slots (drafts ask the lead for times).
+    # Google slots in as a further provider (app/calendar/).
     calendar_provider: Literal["none", "fake", "calcom", "google", "microsoft"] = "none"
     calendar_timeout_seconds: float = 20.0
     calcom_api_key: str = ""
@@ -110,6 +111,20 @@ class Settings(BaseSettings):
     calcom_bookings_api_version: str = "2026-02-25"
     # Reading bookings back (meetings booked through the link).
     calcom_list_bookings_api_version: str = "2026-05-01"
+    # Microsoft Bookings (CALENDAR_PROVIDER=microsoft). Signs in with the
+    # GRAPH_* app above. The business id is its mailbox address, e.g.
+    # Sales@yourco.onmicrosoft.com; GET /calendar/microsoft/discover lists
+    # businesses, services and staff ids.
+    msbookings_business_id: str = ""
+    msbookings_service_id: str = ""
+    # Comma-separated staff ids in round-robin order. Empty: the staff
+    # assigned to the service in Bookings.
+    msbookings_staff_ids: str = ""
+    # Public booking page for emails. Empty: the service's own page.
+    msbookings_booking_url: str = ""
+    # The business's IANA timezone, used only when Graph names a zone in
+    # Windows form that cannot be read.
+    msbookings_timezone: str = "UTC"
     # Fake calendar: meeting length and the host's working timezone.
     fake_calendar_timezone: str = "UTC"
     fake_calendar_booking_url: str = "https://cal.example.com/demo/30min"

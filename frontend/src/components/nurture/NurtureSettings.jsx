@@ -236,8 +236,8 @@ export default function NurtureSettings() {
           <TextRow label="Sender title" value={draft.branding.sender_title} onChange={(v) => setIn('branding', { sender_title: v })} />
           <TextRow label="Logo URL" error={errors.logo_url} description="An https:// image; leave empty for no logo."
             value={draft.branding.logo_url} onChange={(v) => setIn('branding', { logo_url: v })} />
-          <TextRow label="Demo link" error={errors.demo_url} description="Empty: the Cal.com booking link (CALCOM_BOOKING_URL)."
-            value={draft.branding.demo_url} onChange={(v) => setIn('branding', { demo_url: v })} placeholder="https://cal.com/…" />
+          <TextRow label="Demo link" error={errors.demo_url} description="Empty: the calendar's booking link (CALCOM_BOOKING_URL or the Microsoft Bookings page)."
+            value={draft.branding.demo_url} onChange={(v) => setIn('branding', { demo_url: v })} placeholder="https://…" />
           <TextRow label="Pricing link" error={errors.pricing_url} value={draft.branding.pricing_url}
             onChange={(v) => setIn('branding', { pricing_url: v })} placeholder="https://…/pricing" />
         </div>

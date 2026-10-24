@@ -33,7 +33,21 @@ def _build(name: str) -> Optional[CalendarProvider]:
             list_version=s.calcom_list_bookings_api_version,
             timeout=s.calendar_timeout_seconds,
         )
-    if name in ("google", "microsoft"):
+    if name == "microsoft":
+        from app.calendar.msbookings import MSBookingsProvider
+
+        return MSBookingsProvider(
+            tenant_id=s.graph_tenant_id,
+            client_id=s.graph_client_id,
+            client_secret=s.graph_client_secret,
+            business_id=s.msbookings_business_id,
+            service_id=s.msbookings_service_id,
+            staff_ids=s.msbookings_staff_ids.split(","),
+            booking_url=s.msbookings_booking_url,
+            business_timezone=s.msbookings_timezone,
+            timeout=s.calendar_timeout_seconds,
+        )
+    if name == "google":
         # Extension point: implement CalendarProvider for it (see base.py).
         raise CalendarError(f"calendar provider {name!r} is not implemented yet")
     raise CalendarError(f"unknown CALENDAR_PROVIDER: {name}")
@@ -47,6 +61,16 @@ def get_calendar() -> Optional[CalendarProvider]:
     if _calendar is None:
         _calendar = _build(get_settings().calendar_provider)
     return _calendar
+
+
+def booking_link() -> Optional[str]:
+    """The configured calendar's public booking page, or None. Never raises,
+    so callers that only want a link (nurture's demo button) need no checks."""
+    try:
+        cal = get_calendar()
+    except CalendarError:
+        return None
+    return cal.booking_link() if cal else None
 
 
 def use_calendar(provider: Optional[CalendarProvider]) -> None:
