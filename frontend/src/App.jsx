@@ -64,11 +64,46 @@ const WORKSPACES = {
   },
 }
 
-// Sidebar group icons (24px stroke paths).
+// Icons (24px stroke paths): workspaces in the top bar, pages in the sidebar
+// (the folded sidebar shows only these).
 const WORKSPACE_ICONS = {
   sequence: 'M4 7l8 5.5L20 7M4 7v10h16V7',
   triage: 'M4 5h16v11H8l-4 4V5z',
   nurture: 'M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z',
+}
+const PAGE_ICONS = {
+  overview: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+  campaigns: 'M5 21V4h12l-2 4 2 4H5',
+  enroll: 'M15 19a6 6 0 0 0-12 0M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M16 11h6',
+  design: 'M4 20l4-1 11-11-3-3L5 16l-1 4zM14 6l3 3',
+  preview: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  settings: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
+  tools: 'M14.5 5.5a4 4 0 0 0 4.9 4.9L10 19.8 5.2 15l9.3-9.5z',
+  replies: 'M4 13l3-8h10l3 8v6H4zM4 13h5l1 2h4l1-2h5',
+  drafts: 'M6 3h9l4 4v14H6zM14 3v5h5M9 13h6M9 17h4',
+  meetings: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
+  'follow-ups': 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
+  library: 'M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM5 17a3 3 0 0 1 3-3h11M9 8h6',
+  accuracy: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 12.5v-1',
+  dashboard: 'M4 20V11M10 20V5M16 20v-6M21 20H3',
+  leads: 'M16 20a4 4 0 0 0-8 0M12 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM21 20a3.5 3.5 0 0 0-3-3.5M3 20a3.5 3.5 0 0 1 3-3.5',
+  review: 'M4 4h16v16H4zM8 12l3 3 5-6',
+  calendar: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4M8 14h2M12 14h2',
+  handoffs: 'M21 3L10 14M21 3l-7 18-4-7-7-4z',
+  content: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5',
+}
+const NAV_KEY = 'outreach.nav'
+
+function Icon({ d }) {
+  return <svg className="icon" viewBox="0 0 24 24" aria-hidden="true"><path d={d} /></svg>
+}
+
+function readNav() {
+  try {
+    return JSON.parse(localStorage.getItem(NAV_KEY)) || {}
+  } catch {
+    return {}
+  }
 }
 
 const THEME_KEY = 'outreach.theme'
@@ -249,83 +284,112 @@ function Console({ user, onLogout }) {
   }, [refreshHealth])
 
   const nextTheme = { system: 'light', light: 'dark', dark: 'system' }[theme]
-  const [navOpen, setNavOpen] = useState(false)
+  const [navOpen, setNavOpen] = useState(false) // phones: the sidebar as a drawer
+  // Desktop: the sidebar folds to an icon rail, and each workspace group folds
+  // on its own. Remembered per browser.
+  const [nav, setNav] = useState(readNav)
+  const folded = !!nav.folded
+  const groupOpen = (id) => nav.groups?.[id] ?? id === workspace
+  const saveNav = (next) => {
+    setNav(next)
+    try { localStorage.setItem(NAV_KEY, JSON.stringify(next)) } catch { /* ignore */ }
+  }
+  const toggleGroup = (id) => saveNav({ ...nav, groups: { ...nav.groups, [id]: !groupOpen(id) } })
   useEffect(() => { setNavOpen(false) }, [workspace, tab])
   const tabLabel = workspace === 'lead' ? 'Lead journey'
     : (tabsFor(workspace, admin).find(([id]) => id === tab) || [])[1]
 
   return (
     <UserContext.Provider value={user}>
-    <div className={`shell ${navOpen ? 'nav-open' : ''}`}>
-      <aside className="sidebar" aria-label="Navigation">
+    <div className={`shell ${folded ? 'is-folded' : ''} ${navOpen ? 'nav-open' : ''}`}>
+      <header className="topbar">
+        <button className="icon-btn nav-toggle" onClick={() => setNavOpen(!navOpen)} aria-label="Menu" aria-expanded={navOpen}>
+          <Icon d="M4 7h16M4 12h16M4 17h16" />
+        </button>
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path d="M4 7l8 5.5L20 7M4 7v10h16V7" />
-            </svg>
+            <svg viewBox="0 0 24 24"><path d="M4 7l8 5.5L20 7M4 7v10h16V7" /></svg>
           </span>
-          <span className="brand-name">Outreach Console</span>
+          <span className="brand-name">Outreach<span className="brand-accent">OS</span></span>
         </div>
-        <nav className="side-nav">
+        <nav className="ws-tabs" aria-label="Workspace">
           {Object.entries(WORKSPACES).map(([id, w]) => (
-            <div key={id} className="side-group">
-              <div className="side-group-label">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d={WORKSPACE_ICONS[id]} /></svg>
-                {w.label}
-              </div>
-              {tabsFor(id, admin).map(([tid, label]) => {
-                const active = workspace === id && tab === tid
-                return (
-                  <a key={tid} href={hrefFor(id, tid)} className={`side-link ${active ? 'is-active' : ''}`}
-                    aria-current={active ? 'page' : undefined}>
-                    {label}
-                  </a>
-                )
-              })}
-            </div>
+            <a key={id} href={hrefFor(id, tabsFor(id, admin)[0][0])}
+              className={`ws-tab ${workspace === id ? 'is-active' : ''}`} aria-current={workspace === id ? 'page' : undefined}>
+              <Icon d={WORKSPACE_ICONS[id]} />
+              <span>{w.label}</span>
+            </a>
           ))}
         </nav>
-        <div className="side-foot">
-          <div className="side-user" title={`Role: ${user.role}`}>
+        <div className="topbar-status">
+          <HealthPill health={health} error={healthError} />
+          {health?.environment === 'dev' && (
+            <span className="badge badge-info" title="APP_ENV=dev in .env: nurture emails are sent only with Send now">Dev</span>
+          )}
+          {health?.dry_run && (
+            <span className="badge badge-info" title="DRY_RUN=true in .env: no email actually leaves">Dry run</span>
+          )}
+          <button className="icon-btn" onClick={() => setTheme(nextTheme)} title={`Theme: ${theme} (click for ${nextTheme})`} aria-label="Change theme">
+            <Icon d={theme === 'light' ? 'M12 4V2M12 22v-2M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 19.8l-1.4-1.4M5.6 18.4l-1.4 1.4M19.8 4.2l-1.4 1.4M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z'
+              : theme === 'dark' ? 'M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z' : 'M12 21a9 9 0 1 0 0-18v18z'} />
+          </button>
+          <div className="user-chip" title={`${user.email} (${user.role})`}>
             <span className="avatar" aria-hidden="true">{(user.email || '?')[0].toUpperCase()}</span>
-            <span className="side-user-text">
-              <span className="side-user-email">{user.email}</span>
-              <span className="muted">{user.role}</span>
+            <span className="user-chip-text">
+              <span className="user-chip-email">{user.email}</span>
+              <span className="user-chip-role">{user.role}</span>
             </span>
           </div>
-          <div className="side-actions">
-            <button className="btn btn-ghost btn-sm" onClick={() => setTheme(nextTheme)} title={`Theme: ${theme} (click for ${nextTheme})`}>
-              {theme === 'dark' ? 'Dark' : theme === 'light' ? 'Light' : 'Auto'} theme
-            </button>
-            <button className="btn btn-ghost btn-sm" onClick={onLogout}>Sign out</button>
-          </div>
+          <button className="btn btn-ghost btn-sm" onClick={onLogout}>Sign out</button>
         </div>
+      </header>
+
+      <aside className="sidebar" aria-label="Pages">
+        <nav className="side-nav">
+          {Object.entries(WORKSPACES).map(([id, w]) => {
+            const open = folded || groupOpen(id)
+            return (
+              <div key={id} className={`side-group ${workspace === id ? 'is-current' : ''}`}>
+                <button className="side-group-head" onClick={() => toggleGroup(id)} aria-expanded={open}
+                  title={folded ? w.label : undefined} disabled={folded}>
+                  <Icon d={WORKSPACE_ICONS[id]} />
+                  <span className="side-label">{w.label}</span>
+                  <svg className="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+                </button>
+                {open && (
+                  <div className="side-items">
+                    {tabsFor(id, admin).map(([tid, label]) => {
+                      const active = workspace === id && tab === tid
+                      return (
+                        <a key={tid} href={hrefFor(id, tid)} className={`side-link ${active ? 'is-active' : ''}`}
+                          aria-current={active ? 'page' : undefined} title={folded ? `${w.label}: ${label}` : undefined}>
+                          <Icon d={PAGE_ICONS[tid] || PAGE_ICONS.overview} />
+                          <span className="side-label">{label}</span>
+                        </a>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </nav>
+        <button className="side-fold" onClick={() => saveNav({ ...nav, folded: !folded })}
+          aria-label={folded ? 'Expand sidebar' : 'Collapse sidebar'} title={folded ? 'Expand sidebar' : 'Collapse sidebar'}>
+          <Icon d={folded ? 'M13 6l6 6-6 6M5 6l6 6-6 6' : 'M11 6l-6 6 6 6M19 6l-6 6 6 6'} />
+          <span className="side-label">Collapse</span>
+        </button>
       </aside>
       <div className="scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />
 
       <div className="main">
-        <header className="pagebar">
-          <button className="btn btn-ghost btn-sm nav-toggle" onClick={() => setNavOpen(!navOpen)}
-            aria-label="Menu" aria-expanded={navOpen}>☰</button>
+        <div className="page-head">
           <div className="crumbs">
-            {workspace !== 'lead' && <span className="muted">{WORKSPACES[workspace].label}</span>}
-            {workspace !== 'lead' && <span className="muted" aria-hidden="true">/</span>}
+            {workspace !== 'lead' && <span>{WORKSPACES[workspace].label}</span>}
+            {workspace !== 'lead' && <span aria-hidden="true">›</span>}
             <span className="crumb-current">{tabLabel}</span>
           </div>
-          <div className="pagebar-status">
-            <HealthPill health={health} error={healthError} />
-            {health?.environment === 'dev' && (
-              <span className="badge badge-info" title="APP_ENV=dev in .env: nurture emails are sent only with Send now">
-                Dev
-              </span>
-            )}
-            {health?.dry_run && (
-              <span className="badge badge-info" title="DRY_RUN=true in .env: no email actually leaves">
-                Dry run
-              </span>
-            )}
-          </div>
-        </header>
+        </div>
 
       <main className="content">
         {healthError && (
