@@ -65,7 +65,7 @@ def client(monkeypatch):
 def test_marketing_edits_the_design_and_previews_every_kind(client, monkeypatch):
     c, store = client
     r = c.put("/email-design", json={"title": "Account Executive", "company": "Aspire Tech", "accent": "#0f766e",
-                                     "sign_off": "Thanks,", "opt_out": "Reply stop.", "html": True})
+                                     "website": "aspiretss.com", "sign_off": "Thanks,", "opt_out": "Reply stop.", "html": True})
     assert r.status_code == 200 and store["email_style"]["title"] == "Account Executive"
     assert c.put("/email-design", json={"accent": "blue"}).status_code == 422
 
@@ -96,13 +96,22 @@ def _flips_in_dark_mode(html: str) -> bool:
     return 'class="ink"' in html and 'class="page"' in html and ".page {" in html.replace("{{", "{")
 
 
-def test_personal_email_background_follows_dark_mode():
+def test_plain_layout_is_an_ordinary_email():
+    """Plain looks like an email typed in Outlook or Gmail: no background or
+    text colour (the reader's client picks them, so dark mode just works),
+    no boxes, and the signature as text lines."""
+    sig = templates.Signature(name="Alex Rivera", title="Sales", company="Aspire Tech", website="aspiretss.com")
+    mail = templates.personal("Hi Dana,\n\nHello.", sig, sign_off="Best,", opt_out="No thanks?")
+    assert "background" not in mail.html and "<table" not in mail.html and "<style" not in mail.html
+    assert "Best,<br><b>Alex Rivera</b><br>Sales | Aspire Tech<br>" in mail.html
+    assert "<p" in mail.html and "No thanks?" in mail.html
+
+
+def test_card_layout_follows_dark_mode():
     sig = templates.Signature(name="Alex Rivera", title="Sales", company="Aspire Tech")
-    for layout in ("plain", "card"):
-        mail = templates.personal("Hi Dana,\n\nHello.", sig, sign_off="Best,", opt_out="No thanks?", layout=layout)
-        assert _flips_in_dark_mode(mail.html), layout
-        # The signature's own colours are recolourable too, not fixed inline.
-        assert 'class="ink" style="font-weight:600' in mail.html and 'class="soft"' in mail.html
+    mail = templates.personal("Hi Dana,\n\nHello.", sig, sign_off="Best,", layout="card")
+    assert _flips_in_dark_mode(mail.html)
+    assert 'class="ink" style="font-weight:600' in mail.html and 'class="soft"' in mail.html
 
 
 def test_card_layout_wraps_the_same_text_without_images_or_buttons():

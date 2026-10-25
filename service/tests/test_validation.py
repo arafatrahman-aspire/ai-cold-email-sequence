@@ -16,11 +16,18 @@ def _state(emails, attempts=1):
     }
 
 
+PARAS = ("Most IT teams I talk to run phishing simulations by hand and chase the results into a "
+         "spreadsheet afterwards, which eats most of a week.\n\n"
+         "We automate that end to end, so a campaign takes minutes and the report writes itself. "
+         "Would a short look next week be useful?")
+
+
 def _good_email(n):
+    # Laid out like a real email: a greeting line in email 1, short paragraphs.
     return {
         "step_number": n,
         "subject": f"phishing tests at northwind {n}",
-        "body": "x" * 400,
+        "body": ("Hi Dana,\n\n" if n == 1 else "") + PARAS,
     }
 
 
@@ -119,8 +126,22 @@ def test_placeholder_variants_rejected(snippet):
 def test_clean_body_has_no_false_placeholder():
     emails = [_good_email(i) for i in range(1, 5)]
     emails[0]["body"] = (
-        "Most teams we speak to run one phishing simulation a year and chase "
-        "completions by hand afterwards. Worth comparing notes? " + "x" * 300
+        "Hi Dana,\n\nMost teams we speak to run one phishing simulation a year and chase "
+        "completions by hand afterwards, which leaves little time for anything else.\n\n"
+        "Worth comparing notes on how others handle it? A short call would do."
     )
     result = _run(_state(emails))
     assert result["status"] == "ok"
+
+
+def test_one_block_of_text_or_a_missing_greeting_is_rejected():
+    no_greeting = [_good_email(i) for i in range(1, 5)]
+    no_greeting[0]["body"] = "Dana, " + PARAS
+    errors = _run(_state(no_greeting))["validation_errors"]
+    assert errors and "greeting" in errors[0]
+
+    wall = [_good_email(i) for i in range(1, 5)]
+    wall[1]["body"] = PARAS.replace("\n\n", " ")
+    errors = _run(_state(wall))["validation_errors"]
+    assert errors == ["email 2: write the body as 2-3 short paragraphs separated by a blank line, "
+                      "each under 70 words, not one block of text"]

@@ -51,6 +51,10 @@ Hard rules:
   headcounts, customers, funding, news events or named colleagues. You only know
   what is given to you below.
 - Each email is plain text, 60-130 words, and asks for exactly one thing.
+- Lay every body out like a real email: 2-3 short paragraphs of 1-3 sentences,
+  separated by a blank line ("\n\n"). Never one block of text.
+- Email 1 starts with a greeting alone on the first line ("Hi Dana,") followed
+  by a blank line. Emails 2-4 are replies in the same thread: no greeting.
 - Subject lines are 3-7 words, lowercase or sentence case, and never contain the
   company name of the sender or words like "quick", "free", "guarantee", "urgent".
 - Do not include a signature, greeting sign-off block, unsubscribe line or footer.

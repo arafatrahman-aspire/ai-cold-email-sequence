@@ -352,6 +352,7 @@ class EmailStyle(BaseModel):
     accent: str = Field(default="#2563eb", pattern=r"^#[0-9a-fA-F]{6}$")
     html: bool = True
     layout: str = Field(default="plain", pattern="^(plain|card)$")
+    unsubscribe_header: bool = False
 
 
 class RenderRequest(BaseModel):
@@ -369,7 +370,7 @@ class RenderRequest(BaseModel):
 
 SAMPLES = {
     "cold": ("Phishing reports without the chasing",
-             "Most IT teams I talk to run phishing simulations by hand: build the template, pick the "
+             "Hi Dana,\n\nMost IT teams I talk to run phishing simulations by hand: build the template, pick the "
              "targets, chase the results into a spreadsheet.\n\nWe automate that end to end, so a campaign "
              "takes minutes to set up and the report writes itself.\n\nWould it be worth a 15-minute look "
              "next week?"),

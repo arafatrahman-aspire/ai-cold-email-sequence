@@ -25,6 +25,25 @@ _PLACEHOLDER = re.compile(
     re.IGNORECASE,
 )
 
+# Email 1 opens with a greeting on its own line ("Hi Dana,"), then a blank line.
+_GREETING = re.compile(r"^(hi|hello|hey|dear|good (morning|afternoon))\b[^\n]{0,40}\n\s*\n", re.IGNORECASE)
+MAX_PARAGRAPH_WORDS = 70
+
+
+def layout_problem(n: int, body: str) -> str | None:
+    """Why the body does not read like a real email, or None. One wall of
+    text (the model's habit) looks careless and unprofessional."""
+    if n == 1:
+        if not _GREETING.match(body):
+            return f'email {n}: start with a greeting alone on the first line (e.g. "Hi Dana,") and a blank line after it'
+        body = _GREETING.sub("", body, count=1)
+    paras = [p for p in re.split(r"\n\s*\n", body) if p.strip()]
+    if len(paras) < 2 or max(len(p.split()) for p in paras) > MAX_PARAGRAPH_WORDS:
+        return (f"email {n}: write the body as 2-3 short paragraphs separated by a blank line, "
+                f"each under {MAX_PARAGRAPH_WORDS} words, not one block of text")
+    return None
+
+
 _BANNED_SUBJECT_WORDS = {
     "free", "guarantee", "guaranteed", "urgent", "act now", "limited time",
     "!!!", "$$$", "risk-free", "winner",
@@ -82,6 +101,9 @@ async def validate_node(state: SequenceState) -> SequenceState:
             errors.append(
                 f"email {n}: body is too long ({len(body)} chars, maximum {max_body})"
             )
+
+        elif (problem := layout_problem(int(n or 0), body)):
+            errors.append(problem)
 
         said = [b for b in banned if b in f"{subject}\n{body}".lower()]
         if said:

@@ -63,7 +63,8 @@ def test_campaign_banned_claims_fail_validation(monkeypatch):
         return {"llm_min_body_chars": 10, "llm_max_body_chars": 2000}[key]
 
     monkeypatch.setattr(validate, "get_setting", setting)
-    body = "We make audits painless and offer guaranteed compliance for every team you run."
+    body = ("Hi Dana,\n\nWe make audits painless for every team you run.\n\n"
+            "We offer guaranteed compliance, too.")
     state = {"step_count": 1, "draft_attempts": 2,
              "lead": {"playbook": {"banned_claims": ["Guaranteed compliance"]}},
              "emails": [{"step_number": 1, "subject": "audit season", "body": body}]}

@@ -13,7 +13,7 @@ const KINDS = [
 ]
 
 const WHY = {
-  cold: 'Plain: a personal email with a proper signature, no banner or images. Card: the same text in a white card with your company name above it. Heavily designed cold email lands in Promotions and gets fewer replies, so neither has images or buttons.',
+  cold: 'Plain: looks exactly like an email a person typed in Outlook or Gmail, with a text signature. Card: the same text in a white card. Designed-looking cold email lands in Promotions and gets fewer replies, so neither has images or buttons.',
   reply: 'Same personal look, without the opt-out line (they wrote to us).',
   nurture: 'The branded layout: logo, card, one clear button, address and unsubscribe in the footer.',
   handoff: 'What sales receives: why the lead is ready, the facts, and a button to the lead.',
@@ -79,9 +79,9 @@ export default function EmailDesign() {
                 <input value={style.address} onChange={set('address')} />
               </Field>
               <div className="campaign-row">
-                <Field label="Layout (cold emails and answers)" hint="Plain: a bare personal email. Card: the same text in a white card with your company name above it.">
+                <Field label="Layout (cold emails and answers)" hint="Plain: looks like an email typed in Outlook or Gmail (best for the Primary tab). Card: the same text in a white card with your company name above it.">
                   <select value={style.layout || 'plain'} onChange={set('layout')}>
-                    <option value="plain">Plain, like a personal email</option>
+                    <option value="plain">Plain, like a personal email (recommended)</option>
                     <option value="card">Card, more designed</option>
                   </select>
                 </Field>
@@ -93,6 +93,10 @@ export default function EmailDesign() {
               <div className="campaign-toggle">
                 <Toggle label="Send designed HTML" checked={style.html} onChange={(v) => setStyle({ ...style, html: v })} />
                 <span>Send cold emails and answers as designed HTML (off: plain text only)</span>
+              </div>
+              <div className="campaign-toggle">
+                <Toggle label="Unsubscribe header" checked={!!style.unsubscribe_header} onChange={(v) => setStyle({ ...style, unsubscribe_header: v })} />
+                <span>Add the List-Unsubscribe header to cold emails. Gmail then shows an Unsubscribe button and tends to file them under Promotions. Off: people opt out by replying (the opt-out line).</span>
               </div>
               <ErrorNote error={saveError} />
               <div className="form-actions">

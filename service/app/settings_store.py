@@ -57,6 +57,11 @@ DEFAULTS: dict[str, Any] = {
         "accent": "#2563eb", "html": True,
         # Cold emails and answers: "plain" (a bare personal email) or "card".
         "layout": "plain",
+        # The List-Unsubscribe header on cold emails. Gmail shows it as an
+        # "Unsubscribe" button and files the mail as bulk (Promotions); the
+        # opt-out line in the body still lets people say no. Nurture always
+        # sends its own unsubscribe link and header.
+        "unsubscribe_header": False,
     },
     # Reply triage's answer library: [{"id", "title", "text"}], written by
     # marketing; the AI reuses this wording when a reply asks the same thing.

@@ -71,6 +71,24 @@ class Signature:
         contact = " | ".join(p for p in (self.phone, self.website) if p)
         return "\n".join(p for p in (self.name, role, contact) if p)
 
+    def lines_html(self, accent: str = DEFAULT_ACCENT) -> list[str]:
+        """The signature as plain lines, the way Outlook or Gmail writes one."""
+        out = [f"<b>{e(self.name)}</b>"] if self.name else []
+        role = " | ".join(e(p) for p in (self.title, self.company) if p)
+        if role:
+            out.append(role)
+        contact = []
+        if self.phone:
+            contact.append(f'<a href="tel:{e(re.sub(r"[^0-9+]", "", self.phone))}" '
+                           f'style="color:inherit;text-decoration:none">{e(self.phone)}</a>')
+        if self.website:
+            url = self.website if self.website.startswith("http") else f"https://{self.website}"
+            shown = re.sub(r"^https?://(www\.)?", "", self.website).rstrip("/")
+            contact.append(f'<a href="{e(url)}" style="color:{accent}">{e(shown)}</a>')
+        if contact:
+            out.append(" | ".join(contact))
+        return out
+
     def html(self, accent: str = DEFAULT_ACCENT) -> str:
         rows = []
         if self.name:
@@ -108,7 +126,7 @@ def paragraphs(text: str, accent: str = DEFAULT_ACCENT, links: Optional[dict[str
         chunk = _URL.sub(lambda m: f'<a href="{m.group(1)}" style="color:{accent}">{m.group(1)}</a>', chunk)
         for placeholder, anchor in (links or {}).items():
             chunk = chunk.replace(e(placeholder), anchor)
-        out.append(f'<p style="margin:0 0 16px">{chunk.replace(chr(10), "<br>")}</p>')
+        out.append(f'<p style="margin:0 0 14px">{chunk.replace(chr(10), "<br>")}</p>')
     return "".join(out)
 
 
@@ -173,11 +191,11 @@ def personal(body: str, signature: Signature, *, sign_off: str = "", opt_out: st
     if opt_out:
         text += f"\n\n{opt_out}"
 
-    sign_html = f'<p style="margin:0">{e(sign_off)}</p>' if sign_off else ""
-    opt_html = (f'<p class="soft" style="margin:28px 0 0;font-size:12px;line-height:1.5;color:{MUTED}">'
-                f'{e(opt_out)}</p>') if opt_out else ""
-    inner = f"{paragraphs(body, accent)}{sign_html}{signature.html(accent)}{opt_html}"
     if layout == "card":
+        sign_html = f'<p style="margin:0">{e(sign_off)}</p>' if sign_off else ""
+        opt_html = (f'<p class="soft" style="margin:28px 0 0;font-size:12px;line-height:1.5;color:{MUTED}">'
+                    f'{e(opt_out)}</p>') if opt_out else ""
+        inner = f"{paragraphs(body, accent)}{sign_html}{signature.html(accent)}{opt_html}"
         name = (f'<tr><td style="padding:0 4px 14px"><span class="ink" style="font-family:{FONT};font-size:17px;'
                 f'font-weight:700;color:{INK};letter-spacing:-0.01em">{e(signature.company)}</span></td></tr>'
                 if signature.company else "")
@@ -196,17 +214,24 @@ def personal(body: str, signature: Signature, *, sign_off: str = "", opt_out: st
 </body></html>"""
         return Email(text=text, html=doc)
 
-    # The page and text colours both flip in dark mode (class "page" / "ink"):
-    # a fixed white background under light dark-mode text is unreadable.
-    doc = f"""{_head(subject)}
-<body class="page" style="margin:0;padding:0;background:#ffffff">
-<table role="presentation" class="page" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff">
-<tr><td style="padding:8px 16px">
-<table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%">
-<tr><td class="ink" style="font-family:{FONT};font-size:15px;line-height:1.6;color:{INK};text-align:left">
-{inner}
-</td></tr></table>
-</td></tr></table>
+    # Plain: what a person's email client sends. No background, no text colour
+    # (the reader's client picks both, so dark mode just works), no boxes,
+    # normal-size type and a text signature. Designed-looking HTML is one of
+    # the signals that sends cold email to Gmail's Promotions tab.
+    closing = "<br>".join(([e(sign_off)] if sign_off else []) + signature.lines_html(accent))
+    sign_html = f'<p style="margin:0">{closing}</p>' if closing else ""
+    opt_html = (f'<p style="margin:20px 0 0;font-size:12px;color:#888888">{e(opt_out)}</p>'
+                if opt_out else "")
+    doc = f"""<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{e(subject)}</title>
+</head>
+<body style="margin:0;padding:0">
+<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;max-width:600px">
+{paragraphs(body, accent)}{sign_html}{opt_html}
+</div>
 </body></html>"""
     return Email(text=text, html=doc)
 

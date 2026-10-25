@@ -90,7 +90,10 @@ async def _send_step(
         # than four unrelated cold emails.
         in_reply_to=anchor_id if step["step_number"] > 1 else None,
         references=[anchor_id] if (anchor_id and step["step_number"] > 1) else [],
-        unsubscribe_mailto=s.unsubscribe_mailto or inbox.email,
+        # Off by default (Email design): Gmail files mail with this header as
+        # bulk. The opt-out line in the body stays.
+        unsubscribe_mailto=((s.unsubscribe_mailto or inbox.email)
+                            if (await settings_store.email_style()).get("unsubscribe_header") else None),
         reply_to=s.reply_to or None,
     )
 
