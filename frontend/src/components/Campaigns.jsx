@@ -3,7 +3,7 @@ import { api } from '../api.js'
 import { enrollOutcome, formatNumber } from '../labels.js'
 import { LeadLink } from './LeadJourney.jsx'
 import { CheckList, TagInput, Toggle } from './settingsControls.jsx'
-import { AutoTextarea, Badge, Card, ErrorNote, Field, Spinner, useAction } from './ui.jsx'
+import { AutoTextarea, Badge, Card, ErrorNote, Field, Spinner, useAction, confirmDialog } from './ui.jsx'
 
 const STATUS = {
   draft: ['neutral', 'Not started'],
@@ -154,7 +154,7 @@ function Audience({ campaign, onChanged }) {
   useEffect(() => { load() }, [campaign.id]) // eslint-disable-line react-hooks/exhaustive-deps
   const [{ busy: adding, error: addError }, add] = useAction(async (all) => {
     const n = all ? data.total : picked.size
-    if (!window.confirm(`Add ${n} lead${n === 1 ? '' : 's'} to “${campaign.name}”?\n\nTheir emails are written within 5 minutes${campaign.status === 'active' ? ' and sent on schedule.' : ', and wait until you start the campaign.'}`)) return null
+    if (!(await confirmDialog(`Add ${n} lead${n === 1 ? '' : 's'} to “${campaign.name}”?\n\nTheir emails are written within 5 minutes${campaign.status === 'active' ? ' and sent on schedule.' : ', and wait until you start the campaign.'}`))) return null
     const r = await api.enrollCampaign(campaign.id, all ? { all_matching: true } : { lead_ids: [...picked] })
     const refused = r.results.filter((x) => x.outcome !== 'enrolled')
     setNotice({ added: r.enrolled, refused })
@@ -219,7 +219,7 @@ function CampaignCard({ c, onEdit, onChanged }) {
       resume: `Resume “${c.name}”?`,
       end: `End “${c.name}” for good? Emails not sent yet are cancelled for its leads. Sent emails and replies stay.`,
     }[action]
-    if (!window.confirm(words)) return null
+    if (!(await confirmDialog(words))) return null
     const r = await api.campaignAction(c.id, action)
     onChanged()
     return r

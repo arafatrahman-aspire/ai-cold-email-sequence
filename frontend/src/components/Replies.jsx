@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { PERSONAS } from '../labels.js'
-import { Badge, Card, ErrorNote, Field, Spinner, useAction } from './ui.jsx'
+import { Badge, Card, ErrorNote, Field, Spinner, useAction, toast } from './ui.jsx'
 
 const FILTERS = [
   ['reply', 'Replies'],
@@ -31,6 +31,7 @@ export function AlertSettings() {
   const [{ busy: saving, error: saveError }, save] = useAction(async () => {
     await api.putSetting('reply_alert_email', address.trim())
     setSaved(address.trim())
+    toast.success('Alert address saved')
   })
   const [{ busy: testing, error: testError, result: testResult }, test] = useAction(() => api.testAlert())
 

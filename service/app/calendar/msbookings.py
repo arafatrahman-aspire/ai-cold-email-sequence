@@ -218,12 +218,23 @@ class MSBookingsProvider(CalendarProvider):
         return self._service
 
     async def _staff(self) -> list[str]:
-        """The round-robin team, in rotation order."""
-        staff = self._staff_override or (await self._svc()).staff_ids
+        """The round-robin team, in rotation order: MSBOOKINGS_STAFF_IDS (the
+        order), limited to the staff assigned to the service. Bookings answers
+        a booking for someone not on the service with a bare 500, so offering
+        their times would only produce bookings that fail."""
+        assigned = (await self._svc()).staff_ids
+        if not assigned:
+            raise CalendarError(
+                "the Bookings service has no staff assigned: in Bookings, open Services -> "
+                "the service -> Staff, and select the people who take these meetings"
+            )
+        if not self._staff_override:
+            return assigned
+        staff = [s for s in self._staff_override if s in assigned]
         if not staff:
             raise CalendarError(
-                "the Bookings service has no staff assigned; assign them in Bookings "
-                "or set MSBOOKINGS_STAFF_IDS"
+                "none of MSBOOKINGS_STAFF_IDS is assigned to the Bookings service: assign them "
+                "under Services -> the service -> Staff, or empty MSBOOKINGS_STAFF_IDS"
             )
         return staff
 
@@ -352,7 +363,18 @@ class MSBookingsProvider(CalendarProvider):
                 "notes": notes[:500] or None,
             }],
         }
-        data = await self._call("POST", self._biz("/appointments"), "booking", json=body)
+        try:
+            data = await self._call("POST", self._biz("/appointments"), "booking", json=body)
+        except CalendarError as exc:
+            # Graph sometimes answers 500 although the appointment was made
+            # (seen with online-meeting services): look before reporting a
+            # failure, or the next attempt would book the lead twice.
+            if exc.slot_taken:
+                raise
+            data = await self._made_anyway(slot_start, end, attendee.email)
+            if data is None:
+                raise
+            log.warning("Microsoft Bookings reported an error but the booking exists: %s", exc)
         if not data.get("id"):
             raise CalendarError("Microsoft Bookings answered the booking without an id")
         self._last_staff = staff
@@ -364,6 +386,21 @@ class MSBookingsProvider(CalendarProvider):
             end=_graph_time(data.get("end"), self._tz) or end,
             meeting_url=data.get("joinWebUrl") or data.get("anonymousJoinWebUrl") or None,
         )
+
+    async def _made_anyway(self, start: datetime, end: datetime, email: str) -> Optional[dict[str, Any]]:
+        """This service's appointment for ``email`` at ``start``, if it exists."""
+        try:
+            items = await self._appointments(start - timedelta(minutes=1), end + timedelta(minutes=1))
+        except CalendarError:
+            return None
+        for item in items:
+            begins = _graph_time(item.get("start"), self._tz)
+            emails = {(c.get("emailAddress") or "").lower() for c in item.get("customers") or []}
+            emails.add((item.get("customerEmailAddress") or "").lower())
+            if (begins and abs((begins - start).total_seconds()) < 60 and email.lower() in emails
+                    and str(item.get("serviceId")) == self._service_id):
+                return item
+        return None
 
     def booking_link(self) -> Optional[str]:
         """MSBOOKINGS_BOOKING_URL, else the service's page once it has been read."""

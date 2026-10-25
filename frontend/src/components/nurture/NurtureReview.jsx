@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api.js'
 import { EXIT_REASONS, MESSAGE_STATUS, NURTURE_PERSONAS, relativeTime, shortDateTime, TEMPERATURES } from '../../labels.js'
-import { AutoTextarea, Badge, Card, ErrorNote, Spinner, useAction, useIsAdmin } from '../ui.jsx'
+import { AutoTextarea, Badge, Card, ErrorNote, Spinner, useAction, useIsAdmin, confirmDialog } from '../ui.jsx'
 import { LeadLink } from '../LeadJourney.jsx'
 import AiBanner from './AiBanner.jsx'
 import EmailPreview from '../EmailPreview.jsx'
@@ -20,7 +20,7 @@ function MessageCard({ m, onChanged, dev, canSend }) {
     if (dirty && what !== 'reject') await api.nurtureEditMessage(m.id, { subject: subject.trim(), preheader: preheader.trim(), body: body.trim() })
     if (what === 'approve' || what === 'reject') await api.nurtureDecide(m.id, what)
     if (what === 'send') {
-      if (!window.confirm(`Send this email to ${m.email} now?`)) return false
+      if (!(await confirmDialog(`Send this email to ${m.email} now?`))) return false
       await api.nurtureSendNow(m.id)
     }
     onChanged()
@@ -144,7 +144,7 @@ export default function NurtureReview() {
 
 function SendToSales({ h, onDone }) {
   const [{ busy, error, result }, send] = useAction(async () => {
-    if (!window.confirm(`Email this hand-off (${h.email}) to sales again?`)) return null
+    if (!(await confirmDialog(`Email this hand-off (${h.email}) to sales again?`))) return null
     const r = await api.nurtureSendToSales(h.id)
     onDone()
     return r

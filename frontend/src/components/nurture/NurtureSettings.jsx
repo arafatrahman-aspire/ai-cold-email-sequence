@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api.js'
 import { HourSelect, NumberInput, Row, TagInput, Toggle, WeekdayPicker, describeDays, hourLabel } from '../settingsControls.jsx'
-import { Badge, Card, ErrorNote, Spinner, useAction } from '../ui.jsx'
+import { Badge, Card, ErrorNote, Spinner, useAction, toast } from '../ui.jsx'
 import { NurtureStatus } from './NurtureDashboard.jsx'
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
@@ -77,6 +77,7 @@ export default function NurtureSettings() {
     setOriginal(res.settings)
     setDraft(res.settings)
     setStatus(await api.nurtureStatus())
+    toast.success('Nurture settings saved')
     return true
   })
   useEffect(() => {

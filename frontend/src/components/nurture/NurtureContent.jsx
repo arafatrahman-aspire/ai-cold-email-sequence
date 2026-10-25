@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../../api.js'
 import { NURTURE_PERSONAS, TEMPERATURES } from '../../labels.js'
 import { CheckList } from '../settingsControls.jsx'
-import { AutoTextarea, Badge, Card, ErrorNote, Field, Spinner, useAction } from '../ui.jsx'
+import { AutoTextarea, Badge, Card, ErrorNote, Field, Spinner, useAction, confirmDialog } from '../ui.jsx'
 
 const STAGES = ['awareness', 'consideration', 'decision']
 const KINDS = ['guide', 'case_study', 'checklist', 'report', 'webinar', 'blog', 'roi']
@@ -205,7 +205,7 @@ function Resources() {
     await load()
   })
   const [{ busy: removing }, remove] = useAction(async (r) => {
-    if (!window.confirm(`Remove "${r.title}" from the library? Emails already sent keep their links.`)) return
+    if (!(await confirmDialog(`Remove "${r.title}" from the library? Emails already sent keep their links.`))) return
     await api.nurtureDeleteResource(r.id)
     await load()
   })

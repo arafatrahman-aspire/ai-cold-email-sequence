@@ -16,7 +16,7 @@ import {
   regionsToRows,
   rowsToRegions,
 } from './settingsControls.jsx'
-import { Badge, Card, ErrorNote, Spinner, useAction } from './ui.jsx'
+import { Badge, Card, ErrorNote, Spinner, useAction, toast } from './ui.jsx'
 
 // Mirrors the backend's defaults, used when a setting is not in the table yet.
 const DEFAULTS = {
@@ -226,6 +226,7 @@ export default function Settings() {
       await api.putSetting(key, current[key])
     }
     setSavedAt(new Date())
+    toast.success('Settings saved')
     await load()
   })
 

@@ -3,7 +3,7 @@ import { api } from '../../api.js'
 import { DRAFT_KINDS } from '../../labels.js'
 import { AlertSettings } from '../Replies.jsx'
 import { NumberInput, Row, Toggle } from '../settingsControls.jsx'
-import { Badge, Card, ErrorNote, Spinner, useAction } from '../ui.jsx'
+import { Badge, Card, ErrorNote, Spinner, useAction, toast } from '../ui.jsx'
 
 const DEFAULTS = {
   enabled: true,
@@ -95,6 +95,7 @@ export default function TriageSettings() {
   const [{ busy: saving, error: saveError, result: saved }, save] = useAction(async () => {
     await api.putSetting('triage', draft)
     setOriginal(draft)
+    toast.success('Reply triage settings saved')
     return true
   })
   useEffect(() => {

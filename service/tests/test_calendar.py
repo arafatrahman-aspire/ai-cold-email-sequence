@@ -94,8 +94,10 @@ class FakeGraph:
     works 10:00-11:00 and 14:00-14:30 UTC on weekdays; their appointments
     are busy. Like Graph, appointments are not checked for clashes."""
 
-    def __init__(self, staff=("s1",)):
+    def __init__(self, staff=("s1",), assigned=None, error_after_create=False):
         self.staff = list(staff)
+        self.assigned = list(staff if assigned is None else assigned)  # on the service
+        self.error_after_create = error_after_create
         self.requests: list[httpx.Request] = []
         self.appointments: list[dict] = []
         self.tokens = 0
@@ -138,7 +140,7 @@ class FakeGraph:
             return httpx.Response(200, json={
                 "id": SERVICE, "displayName": "Intro call", "defaultDuration": "PT30M",
                 "preBuffer": "PT0S", "postBuffer": "PT0S", "isLocationOnline": True,
-                "staffMemberIds": self.staff, "webUrl": "https://outlook.office365.com/book/Sales/s/svc-1",
+                "staffMemberIds": self.assigned, "webUrl": "https://outlook.office365.com/book/Sales/s/svc-1",
                 "schedulingPolicy": {"timeSlotInterval": "PT30M", "minimumLeadTime": "PT0S",
                                      "maximumAdvance": "P365D"}})
         if path == f"{base}/services":
@@ -159,6 +161,8 @@ class FakeGraph:
                     "createdDateTime": f"2026-10-01T00:00:{len(self.appointments):02d}Z",
                     "joinWebUrl": "https://teams.microsoft.com/l/meetup-join/x"}
             self.appointments.append(appt)
+            if self.error_after_create:  # Graph's "500 but booked anyway"
+                return httpx.Response(500, json={"error": {"code": "UnknownError", "message": ""}})
             return httpx.Response(201, json=appt)
         if path == f"{base}/calendarView":
             start = datetime.fromisoformat(request.url.params["start"].replace("Z", "+00:00"))
@@ -435,3 +439,41 @@ def test_iso_durations():
     assert parse_duration("PT30M") == timedelta(minutes=30)
     assert parse_duration("P1DT2H") == timedelta(days=1, hours=2)
     assert parse_duration("PT0S") == timedelta(0) == parse_duration(None) == parse_duration("junk")
+
+
+@pytest.mark.anyio
+async def test_msbookings_only_offers_staff_assigned_to_the_service():
+    # Bookings answers a booking for staff not on the service with a bare 500.
+    cal, _ = msbookings(FakeGraph(staff=("s1", "s2"), assigned=()), staff_ids=["s1", "s2"])
+    with pytest.raises(CalendarError, match="no staff assigned"):
+        await cal.free_slots(MON, MON + timedelta(days=1))
+
+    cal, _ = msbookings(FakeGraph(staff=("s1", "s2"), assigned=("s3",)), staff_ids=["s1", "s2"])
+    with pytest.raises(CalendarError, match="none of MSBOOKINGS_STAFF_IDS"):
+        await cal.free_slots(MON, MON + timedelta(days=1))
+
+    # Only the assigned one of the configured staff gets bookings.
+    cal, server = msbookings(FakeGraph(staff=("s1", "s2"), assigned=("s2",)), staff_ids=["s1", "s2"])
+    await cal.book(MON + timedelta(hours=10), DANA)
+    assert server.appointments[-1]["staffMemberIds"] == ["s2"]
+
+
+@pytest.mark.anyio
+async def test_msbookings_error_after_the_appointment_was_made_counts_as_booked():
+    cal, server = msbookings(FakeGraph(error_after_create=True))
+    booking = await cal.book(MON + timedelta(hours=10), DANA)
+    assert booking.external_id == server.appointments[0]["id"] and len(server.appointments) == 1
+
+
+@pytest.mark.anyio
+async def test_msbookings_real_failure_is_still_reported():
+    server = FakeGraph()
+
+    def refuse(request):
+        if request.url.path.endswith("/appointments") and request.method == "POST":
+            return httpx.Response(500, json={"error": {"code": "UnknownError", "message": ""}})
+        return server(request)
+
+    cal = MSBookingsProvider("t", "c", "s", BIZ, SERVICE, transport=httpx.MockTransport(refuse))
+    with pytest.raises(CalendarError, match="500"):
+        await cal.book(MON + timedelta(hours=10), DANA)

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { EMAIL_STATUSES, ENROLLMENT_BADGE, enrollOutcome, formatNumber, relativeTime, shortDateTime } from '../labels.js'
-import { AutoTextarea, Badge, Card, ErrorNote, Field, Spinner, useAction } from './ui.jsx'
+import { AutoTextarea, Badge, Card, ErrorNote, Field, Spinner, useAction, confirmDialog, toast } from './ui.jsx'
 import { LeadLink } from './LeadJourney.jsx'
 import EmailPreview from './EmailPreview.jsx'
 
@@ -200,7 +200,7 @@ function LeadBrowser() {
 
   const [{ busy: acting, error: actError }, act] = useAction(async (action, leads) => {
     const text = confirmText(action, leads)
-    if (text && !window.confirm(text)) return
+    if (text && !(await confirmDialog(text))) return
     let done = 0
     const problems = []
     if (action === 'enroll') {
@@ -224,13 +224,16 @@ function LeadBrowser() {
     }
     const verb = { enroll: 'Enrolled', reenroll: 'Enrolled again', remove: 'Removed' }[action]
     const subject = leads.length === 1 ? who(leads[0]) : `${formatNumber(done)} of ${formatNumber(leads.length)}`
-    setNotice({
-      tone: problems.length ? 'warning' : 'good',
-      text: done
-        ? `${verb} ${subject}.${action === 'remove' ? '' : ' Sequences are drafted within 5 minutes.'}`
-        : 'Nothing changed.',
-      problems,
-    })
+    const summary = done
+      ? `${verb} ${subject}.${action === 'remove' ? '' : ' Sequences are drafted within 5 minutes.'}`
+      : 'Nothing changed.'
+    // A clean result is a toast; one with refusals stays on the page, with the reasons.
+    if (done && !problems.length) {
+      setNotice(null)
+      toast.success(summary)
+    } else {
+      setNotice({ tone: 'warning', text: summary, problems })
+    }
     setSelected(new Map())
     await load()
   })

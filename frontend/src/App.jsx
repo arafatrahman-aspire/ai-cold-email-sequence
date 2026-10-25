@@ -20,7 +20,7 @@ import Drafts from './components/triage/Drafts.jsx'
 import { FollowUps, Meetings } from './components/triage/Meetings.jsx'
 import TriageReplies from './components/triage/TriageReplies.jsx'
 import TriageSettings from './components/triage/TriageSettings.jsx'
-import { Badge, UserContext, isAdminUser } from './components/ui.jsx'
+import { Badge, ConfirmHost, Toaster, UserContext, isAdminUser, toast } from './components/ui.jsx'
 
 // Three workspaces in one console: OUT-01 (sending the cold sequence), OUT-05
 // (handling the replies) and Email Nurture. The hash holds both parts:
@@ -62,6 +62,13 @@ const WORKSPACES = {
       ['settings', 'Settings', 'admin'],
     ],
   },
+}
+
+// Sidebar group icons (24px stroke paths).
+const WORKSPACE_ICONS = {
+  sequence: 'M4 7l8 5.5L20 7M4 7v10h16V7',
+  triage: 'M4 5h16v11H8l-4 4V5z',
+  nurture: 'M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z',
 }
 
 const THEME_KEY = 'outreach.theme'
@@ -185,7 +192,7 @@ export default function App() {
       setCsrfToken('')
       window.location.assign(typeof redirect === 'string' ? redirect : '/?signedout=1')
     } catch {
-      window.alert('Sign out failed. Please retry.')
+      toast.error('Sign out failed. Please retry.')
     }
   }
 
@@ -242,30 +249,70 @@ function Console({ user, onLogout }) {
   }, [refreshHealth])
 
   const nextTheme = { system: 'light', light: 'dark', dark: 'system' }[theme]
+  const [navOpen, setNavOpen] = useState(false)
+  useEffect(() => { setNavOpen(false) }, [workspace, tab])
+  const tabLabel = workspace === 'lead' ? 'Lead journey'
+    : (tabsFor(workspace, admin).find(([id]) => id === tab) || [])[1]
 
   return (
     <UserContext.Provider value={user}>
-    <div className="app">
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="brand">
-            <span className="brand-mark" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path d="M4 7l8 5.5L20 7M4 7v10h16V7" />
-              </svg>
-            </span>
-            <span className="brand-name">Outreach Console</span>
-          </div>
-          <div className="workspace-switch" role="tablist" aria-label="Workspace">
-            {Object.entries(WORKSPACES).map(([id, w]) => (
-              <a key={id} role="tab" aria-selected={workspace === id}
-                className={`workspace ${workspace === id ? 'is-active' : ''}`}
-                href={hrefFor(id, w.tabs[0][0])}>
+    <div className={`shell ${navOpen ? 'nav-open' : ''}`}>
+      <aside className="sidebar" aria-label="Navigation">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M4 7l8 5.5L20 7M4 7v10h16V7" />
+            </svg>
+          </span>
+          <span className="brand-name">Outreach Console</span>
+        </div>
+        <nav className="side-nav">
+          {Object.entries(WORKSPACES).map(([id, w]) => (
+            <div key={id} className="side-group">
+              <div className="side-group-label">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d={WORKSPACE_ICONS[id]} /></svg>
                 {w.label}
-              </a>
-            ))}
+              </div>
+              {tabsFor(id, admin).map(([tid, label]) => {
+                const active = workspace === id && tab === tid
+                return (
+                  <a key={tid} href={hrefFor(id, tid)} className={`side-link ${active ? 'is-active' : ''}`}
+                    aria-current={active ? 'page' : undefined}>
+                    {label}
+                  </a>
+                )
+              })}
+            </div>
+          ))}
+        </nav>
+        <div className="side-foot">
+          <div className="side-user" title={`Role: ${user.role}`}>
+            <span className="avatar" aria-hidden="true">{(user.email || '?')[0].toUpperCase()}</span>
+            <span className="side-user-text">
+              <span className="side-user-email">{user.email}</span>
+              <span className="muted">{user.role}</span>
+            </span>
           </div>
-          <div className="topbar-status">
+          <div className="side-actions">
+            <button className="btn btn-ghost btn-sm" onClick={() => setTheme(nextTheme)} title={`Theme: ${theme} (click for ${nextTheme})`}>
+              {theme === 'dark' ? 'Dark' : theme === 'light' ? 'Light' : 'Auto'} theme
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={onLogout}>Sign out</button>
+          </div>
+        </div>
+      </aside>
+      <div className="scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />
+
+      <div className="main">
+        <header className="pagebar">
+          <button className="btn btn-ghost btn-sm nav-toggle" onClick={() => setNavOpen(!navOpen)}
+            aria-label="Menu" aria-expanded={navOpen}>☰</button>
+          <div className="crumbs">
+            {workspace !== 'lead' && <span className="muted">{WORKSPACES[workspace].label}</span>}
+            {workspace !== 'lead' && <span className="muted" aria-hidden="true">/</span>}
+            <span className="crumb-current">{tabLabel}</span>
+          </div>
+          <div className="pagebar-status">
             <HealthPill health={health} error={healthError} />
             {health?.environment === 'dev' && (
               <span className="badge badge-info" title="APP_ENV=dev in .env: nurture emails are sent only with Send now">
@@ -277,29 +324,8 @@ function Console({ user, onLogout }) {
                 Dry run
               </span>
             )}
-            <span className="muted" title={`Role: ${user.role}`}>{user.email}</span>
-            <button className="btn btn-ghost btn-sm" onClick={onLogout}>
-              Sign out
-            </button>
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => setTheme(nextTheme)}
-              title={`Theme: ${theme} (click for ${nextTheme})`}
-            >
-              {theme === 'dark' ? 'Dark' : theme === 'light' ? 'Light' : 'Auto'}
-            </button>
           </div>
-        </div>
-        <nav className="tabs" aria-label="Sections">
-          <div className="tabs-inner">
-            {workspace !== 'lead' && tabsFor(workspace, admin).map(([id, label]) => (
-              <a key={id} href={hrefFor(workspace, id)} className={`tab ${tab === id ? 'is-active' : ''}`} aria-current={tab === id ? 'page' : undefined}>
-                {label}
-              </a>
-            ))}
-          </div>
-        </nav>
-      </header>
+        </header>
 
       <main className="content">
         {healthError && (
@@ -354,6 +380,9 @@ function Console({ user, onLogout }) {
           </>
         )}
       </main>
+      </div>
+      <Toaster />
+      <ConfirmHost />
     </div>
     </UserContext.Provider>
   )

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api.js'
-import { AutoTextarea, Badge, Card, ErrorNote, Spinner, useAction } from '../ui.jsx'
+import { AutoTextarea, Badge, Card, ErrorNote, Spinner, useAction, toast } from '../ui.jsx'
 import { forgetSnippets } from './Drafts.jsx'
 
 const EXAMPLES = [
@@ -24,6 +24,7 @@ export default function AnswerLibrary() {
     setSaved(r.snippets)
     setItems(r.snippets)
     forgetSnippets()
+    toast.success('Answer library saved')
     return true
   })
 

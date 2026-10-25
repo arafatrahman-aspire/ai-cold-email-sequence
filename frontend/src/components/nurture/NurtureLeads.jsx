@@ -4,7 +4,7 @@ import {
   EXIT_REASONS, formatNumber, MESSAGE_STATUS, NURTURE_PERSONAS, NURTURE_STATUS, nurtureOutcome,
   relativeTime, shortDateTime, TEMPERATURES,
 } from '../../labels.js'
-import { Badge, Card, ErrorNote, Spinner, useAction } from '../ui.jsx'
+import { Badge, Card, ErrorNote, Spinner, useAction, confirmDialog, toast } from '../ui.jsx'
 import { LeadLink } from '../LeadJourney.jsx'
 
 const name = (e) => [e.first_name, e.last_name].filter(Boolean).join(' ') || e.email
@@ -107,7 +107,7 @@ function Detail({ id, onChanged, onClose }) {
   const [detail, setDetail] = useState(null)
   const [{ busy: loading, error }, load] = useAction(async () => setDetail(await api.nurtureEnrollment(id)))
   const [{ busy, error: actError }, act] = useAction(async (action, body, confirm) => {
-    if (confirm && !window.confirm(confirm)) return
+    if (confirm && !(await confirmDialog(confirm))) return
     await api.nurtureAction(id, action, body)
     await load()
     onChanged()
@@ -233,19 +233,21 @@ export default function NurtureLeads() {
 
   const [{ busy: acting, error: actError }, act] = useAction(async (action, leads) => {
     if (action === 'enroll') {
-      if (!window.confirm(`Enroll ${leads.length} lead${leads.length === 1 ? '' : 's'} in Email Nurture? Each starts receiving the 6 emails.`)) return
+      if (!(await confirmDialog(`Enroll ${leads.length} lead${leads.length === 1 ? '' : 's'} in Email Nurture? Each starts receiving the 6 emails.`))) return
       const r = await api.nurtureEnroll({ lead_ids: leads.map((l) => l.lead_id) })
       const reasons = {}
       for (const x of r.results) if (x.outcome !== 'enrolled') reasons[x.outcome] = (reasons[x.outcome] || 0) + 1
-      setNotice({ tone: Object.keys(reasons).length ? 'warning' : 'good',
-        text: `Enrolled ${r.enrolled} of ${leads.length}.` + Object.entries(reasons).map(([k, n]) => ` ${nurtureOutcome(k)}: ${n}.`).join('') })
+      const text = `Enrolled ${r.enrolled} of ${leads.length}.` + Object.entries(reasons).map(([k, n]) => ` ${nurtureOutcome(k)}: ${n}.`).join('')
+      if (Object.keys(reasons).length) setNotice({ tone: 'warning', text })
+      else { setNotice(null); toast.success(text) }
     } else {
-      if (!window.confirm(`Remove ${leads.length} lead${leads.length === 1 ? '' : 's'} from nurture? Unsent emails are cancelled.`)) return
+      if (!(await confirmDialog(`Remove ${leads.length} lead${leads.length === 1 ? '' : 's'} from nurture? Unsent emails are cancelled.`))) return
       let done = 0
       for (const l of leads) {
         try { await api.nurtureAction(l.enrollment_id, 'remove'); done += 1 } catch { /* shown in the count */ }
       }
-      setNotice({ tone: done === leads.length ? 'good' : 'warning', text: `Removed ${done} of ${leads.length}.` })
+      if (done === leads.length) { setNotice(null); toast.success(`Removed ${done} of ${leads.length}.`) }
+      else setNotice({ tone: 'warning', text: `Removed ${done} of ${leads.length}.` })
     }
     setSelected(new Map())
     await load()

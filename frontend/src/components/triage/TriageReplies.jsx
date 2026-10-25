@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api.js'
 import { CATEGORIES, CATEGORY_ORDER, TRIAGE_STATUS, formatNumber, relativeTime, shortDateTime } from '../../labels.js'
 import { BarList, StatTile } from '../Dashboard.jsx'
-import { Badge, Card, ErrorNote, ReplyCheckSchedule, Spinner, useAction } from '../ui.jsx'
+import { Badge, Card, ErrorNote, ReplyCheckSchedule, Spinner, useAction, confirmDialog, toast } from '../ui.jsx'
 import { LeadLink } from '../LeadJourney.jsx'
 import { DraftCard } from './Drafts.jsx'
 
@@ -88,9 +88,10 @@ function Times({ reply, onBooked }) {
       await load()
       return null
     }
-    if (!window.confirm(`Book ${slot.label} with ${reply.from_email}?\n\nThe calendar invite goes out now, and a confirmation email is written for them.`)) return null
+    if (!(await confirmDialog(`Book ${slot.label} with ${reply.from_email}?\n\nThe calendar invite goes out now, and a confirmation email is written for them.`))) return null
     const r = await api.bookFromCard(reply.id, slot.start)
     setNotice(`Booked ${r.booked}.${r.draft_id ? ' The confirmation for them is shown on this card (it follows the usual send rules).' : ''} ${r.note || ''}`)
+    toast.success(`Meeting booked: ${r.booked}`)
     onBooked()
     return r
   })
@@ -150,7 +151,7 @@ function ReplyCard({ reply, onChanged, draft, now }) {
 
   const change = async (cat) => {
     const what = cat ? `Sort this reply as "${CATEGORIES[cat][1]}" and act on it` : 'Let the AI read this reply again and act on it'
-    if (!window.confirm(`${what}?\n\nA new answer may be drafted; it replaces any draft still waiting for this lead. Nothing is sent without the usual delay or your approval.`)) return
+    if (!(await confirmDialog(`${what}?\n\nA new answer may be drafted; it replaces any draft still waiting for this lead. Nothing is sent without the usual delay or your approval.`))) return
     if ((await rerun(cat)) !== undefined) onChanged()
   }
 

@@ -1,4 +1,4 @@
-import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 // The signed-in user ({id, email, role}). Admins (admin / superadmin) also see
 // configuration, test mode and dev tools; the server enforces the same rule.
@@ -123,4 +123,114 @@ export function AutoTextarea({ value, minRows = 4, ...props }) {
     el.style.height = `${el.scrollHeight + 2}px`
   }, [value])
   return <textarea ref={ref} rows={minRows} value={value} {...props} style={{ overflow: 'hidden', resize: 'none' }} />
+}
+
+
+// --- Toasts -------------------------------------------------------------------
+// toast.success('Saved') from anywhere (no hook needed); <Toaster /> renders
+// them once, at the app root. Errors stay longer than confirmations.
+const toastListeners = new Set()
+let toastSeq = 0
+function pushToast(tone, message, { title, duration } = {}) {
+  const item = { id: ++toastSeq, tone, title, message, duration: duration ?? (tone === 'critical' ? 9000 : 5000) }
+  toastListeners.forEach((fn) => fn(item))
+}
+export const toast = {
+  success: (message, opts) => pushToast('good', message, opts),
+  info: (message, opts) => pushToast('neutral', message, opts),
+  warning: (message, opts) => pushToast('warning', message, opts),
+  error: (message, opts) => pushToast('critical', message, opts),
+}
+
+export function Toaster() {
+  const [items, setItems] = useState([])
+  const close = (id) => setItems((list) => list.filter((t) => t.id !== id))
+  useEffect(() => {
+    const add = (item) => {
+      setItems((list) => [...list.slice(-3), item])
+      setTimeout(() => close(item.id), item.duration)
+    }
+    toastListeners.add(add)
+    return () => { toastListeners.delete(add) }
+  }, [])
+  return (
+    <div className="toaster" role="region" aria-label="Notifications" aria-live="polite">
+      {items.map((t) => (
+        <div key={t.id} className={`toast toast-${t.tone}`} role={t.tone === 'critical' ? 'alert' : 'status'}>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d={ICONS[t.tone] || ICONS.neutral} /></svg>
+          <div className="toast-body">
+            {t.title && <strong>{t.title}</strong>}
+            <span>{t.message}</span>
+          </div>
+          <button className="toast-close" onClick={() => close(t.id)} aria-label="Dismiss">×</button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// --- Modal ----------------------------------------------------------------------
+// A native <dialog>: focus is trapped, Esc closes it, the page behind is inert.
+export function Modal({ open, title, onClose, children, footer, size = 'md' }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (open && !el.open) el.showModal()
+    if (!open && el.open) el.close()
+  }, [open])
+  return (
+    <dialog ref={ref} className={`modal modal-${size}`} onCancel={(e) => { e.preventDefault(); onClose?.() }}
+      onClick={(e) => { if (e.target === ref.current) onClose?.() }}>
+      {open && (
+        <div className="modal-inner">
+          <header className="modal-head">
+            <h2>{title}</h2>
+            {onClose && <button className="modal-x" onClick={onClose} aria-label="Close">×</button>}
+          </header>
+          <div className="modal-body">{children}</div>
+          {footer && <footer className="modal-foot">{footer}</footer>}
+        </div>
+      )}
+    </dialog>
+  )
+}
+
+// await confirmDialog('Remove 3 leads?\n\nUnsent emails are cancelled.')
+// -> true / false. The first paragraph is the title, the rest the details;
+// removing, ending or deleting gets a red button. <ConfirmHost /> renders it.
+let openConfirm = null
+export function confirmDialog(message, { confirmLabel, danger } = {}) {
+  let [title, ...rest] = String(message).split(/\n\s*\n/)
+  // "End it? Unsent emails are cancelled." -> title "End it?", the rest below.
+  const q = !rest.length && title.match(/^([^?]+\?)\s+(.+)$/s)
+  if (q) { title = q[1]; rest = [q[2]] }
+  const verb = title.split(/\s/)[0].replace(/\W/g, '')
+  const req = {
+    title, body: rest.join('\n\n'),
+    danger: danger ?? /^(remove|end|delete|reject|cancel)\b/i.test(title),
+    // The button says what happens ("Enroll", "Book", "End"), not "OK".
+    confirmLabel: confirmLabel || (/^(let|is|are|do|should)$/i.test(verb) || !verb ? 'Confirm' : verb),
+  }
+  if (!openConfirm) return Promise.resolve(window.confirm(message))
+  return new Promise((resolve) => openConfirm({ ...req, resolve }))
+}
+
+export function ConfirmHost() {
+  const [req, setReq] = useState(null)
+  useEffect(() => { openConfirm = setReq; return () => { openConfirm = null } }, [])
+  const answer = (value) => { req?.resolve(value); setReq(null) }
+  return (
+    <Modal open={!!req} title={req?.title || ''} onClose={() => answer(false)} size="sm"
+      footer={req && (
+        <>
+          <button className="btn btn-ghost" onClick={() => answer(false)}>Cancel</button>
+          <button className={`btn ${req.danger ? 'btn-danger' : 'btn-primary'}`} autoFocus onClick={() => answer(true)}>
+            {req.confirmLabel}
+          </button>
+        </>
+      )}>
+      {req?.body && <p className="modal-text">{req.body}</p>}
+    </Modal>
+  )
 }

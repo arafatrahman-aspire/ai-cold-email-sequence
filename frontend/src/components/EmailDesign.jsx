@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { Toggle } from './settingsControls.jsx'
 import { EmailFrame } from './EmailPreview.jsx'
-import { Card, ErrorNote, Field, Spinner, useAction } from './ui.jsx'
+import { Card, ErrorNote, Field, Spinner, useAction, toast } from './ui.jsx'
 
 const KINDS = [
   ['cold', 'Cold email'],
@@ -35,6 +35,7 @@ export default function EmailDesign() {
     const s = (await api.saveEmailDesign(style)).style
     setStyle(s)
     setSaved(s)
+    toast.success('Email design saved')
     await render()
   })
   useEffect(() => { loadStyle() }, []) // eslint-disable-line react-hooks/exhaustive-deps
