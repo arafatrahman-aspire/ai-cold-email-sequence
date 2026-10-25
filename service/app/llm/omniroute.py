@@ -28,10 +28,12 @@ class OmniRouteClient(LLMClient):
         model: str,
         fallback_model: str,
         timeout: float,
+        max_output_tokens: int = 8192,
     ) -> None:
         if not base_url:
             raise LLMError("OMNIROUTE_BASE_URL is not set")
         self._model = model
+        self._max_output_tokens = max_output_tokens
         self._fallback_model = fallback_model
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
@@ -60,6 +62,7 @@ class OmniRouteClient(LLMClient):
         payload = {
             "model": model,
             "temperature": temperature,
+            "max_tokens": self._max_output_tokens,
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system},

@@ -54,6 +54,11 @@ class Settings(BaseSettings):
 
     llm_timeout_seconds: float = 90.0
     llm_temperature: float = 0.7
+    # Output cap per LLM call. A 4-email sequence needs ~1-2k tokens; without
+    # a cap, OpenRouter reserves credit for the model's maximum (65k) and
+    # refuses the call when the balance is lower. Thinking models count their
+    # reasoning against it too, so keep it well above the answer's size.
+    llm_max_output_tokens: int = 8192
 
     # --- Mail transport -----------------------------------------------------
     # "smtp"  -> plain SMTP submission (VPS relay, Outlook, Zoho, anything)

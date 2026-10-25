@@ -16,11 +16,13 @@ class GeminiClient(LLMClient):
     name = "gemini"
 
     def __init__(
-        self, api_key: str, model: str, base_url: str, timeout: float
+        self, api_key: str, model: str, base_url: str, timeout: float,
+        max_output_tokens: int = 8192,
     ) -> None:
         if not api_key:
             raise LLMError("GEMINI_API_KEY is not set")
         self._model = model
+        self._max_output_tokens = max_output_tokens
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=timeout,
@@ -53,6 +55,7 @@ class GeminiClient(LLMClient):
             "generationConfig": {
                 "temperature": temperature,
                 "responseMimeType": "application/json",
+                "maxOutputTokens": self._max_output_tokens,
             },
         }
         try:

@@ -21,6 +21,7 @@ def _build(name: str) -> LLMClient:
             model=s.gemini_model,
             base_url=s.gemini_base_url,
             timeout=s.llm_timeout_seconds,
+            max_output_tokens=s.llm_max_output_tokens,
         )
     if name == "omniroute":
         return OmniRouteClient(
@@ -29,6 +30,7 @@ def _build(name: str) -> LLMClient:
             model=s.omniroute_model,
             fallback_model=s.omniroute_fallback_model,
             timeout=s.llm_timeout_seconds,
+            max_output_tokens=s.llm_max_output_tokens,
         )
     raise LLMError(f"unknown LLM provider: {name}")
 
