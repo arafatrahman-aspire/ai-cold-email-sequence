@@ -18,8 +18,9 @@ STEPS = 6
 DEFAULTS: dict[str, Any] = {
     # Pause-all: no writing and no sending while true.
     "paused": False,
-    # Enroll automatically when a score changes to Warm or Cold.
-    "auto_enroll": True,
+    # Enroll automatically when a score changes to Warm or Cold. Off: leads
+    # join only from the console (Nurture -> Leads -> Enroll).
+    "auto_enroll": False,
     # Days become minutes; only the allow-listed addresses are emailed.
     "test_mode": {"enabled": False, "minutes_per_day": 1, "allow_list": []},
     "cadence": {"cold": [0, 5, 10, 16, 23, 30], "warm": [0, 3, 7, 12, 19, 28]},

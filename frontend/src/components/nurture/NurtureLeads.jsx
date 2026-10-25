@@ -284,7 +284,7 @@ export default function NurtureLeads() {
           <h1>Nurture leads</h1>
           <p className="muted">
             Every lead in your shared leads table. Tick the ones to enroll (Warm and Cold leads that may join), or the
-            ones in nurture to remove. Score changes still enroll leads automatically.
+            ones in nurture to remove. Nobody joins on their own unless "Enroll on score change" is on in Settings.
           </p>
         </div>
       </div>

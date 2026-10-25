@@ -120,5 +120,12 @@ class MailReader(abc.ABC):
         it replies to cold email) is skipped rather than read.
         """
 
+    def owns_cursor(self, cursor: int) -> bool:
+        """Whether a stored cursor was written by this kind of reader. IMAP
+        keeps a message UID, Graph an epoch second: when an inbox moves from
+        IMAP to Graph, its old UID is not read as a 1970 timestamp (which
+        would import old mail); tracking restarts from now instead."""
+        return True
+
     async def aclose(self) -> None:  # pragma: no cover
         return None

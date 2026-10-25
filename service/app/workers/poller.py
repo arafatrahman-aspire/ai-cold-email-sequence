@@ -128,7 +128,7 @@ async def _start_tracking(inbox: Inbox) -> bool:
     reading a whole mailbox history would be slow and pointless. Returns
     False for an empty IMAP folder, where there is nothing to skip.
     """
-    cursor = await get_reader().current_cursor(inbox)
+    cursor = await get_reader(inbox).current_cursor(inbox)
     if cursor <= 0:
         return False
     await repo.update_inbox_cursor(inbox.id, cursor)
@@ -144,9 +144,13 @@ async def poll_inbox(inbox: Inbox) -> tuple[dict[str, int], str | None]:
         # forwarded to, or reply-to'd at, an inbox that is read.
         return stats, None
     try:
-        if inbox.poll_cursor == 0 and await _start_tracking(inbox):
+        reader = get_reader(inbox)
+        # First poll, or the inbox switched reader (the cursor is the other
+        # reader's kind): start from now rather than misread it.
+        fresh = inbox.poll_cursor == 0 or not reader.owns_cursor(inbox.poll_cursor)
+        if fresh and await _start_tracking(inbox):
             return {"tracking_started": 1}, None
-        messages = await get_reader().fetch_new(inbox)
+        messages = await reader.fetch_new(inbox)
     except MailError as exc:
         log.warning("poll failed for %s: %s", inbox.email, exc)
         return {"error": 1}, f"{inbox.email}: {exc}"

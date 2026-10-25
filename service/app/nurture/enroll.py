@@ -3,8 +3,9 @@
 There are no triggers on the shared tables, so every few minutes:
   * everyone in nurture is checked against their current score: Hot ->
     hand off to sales; Warm <-> Cold -> switch track from the next email
-  * leads rescored since the last check (lead_scores.updated_at / scored_at)
-    that are now Warm or Cold are enrolled, if they may join
+  * only when "Enroll on score change" is on (setting auto_enroll, off by
+    default): leads rescored since the last check (lead_scores.updated_at /
+    scored_at) that are now Warm or Cold are enrolled, if they may join
 The very first check only remembers the time: leads that were already Warm
 or Cold are enrolled from the console ("Enroll eligible"), not automatically.
 The hourly reconciliation looks back 48 hours, so a failed run is caught.

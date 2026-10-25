@@ -29,7 +29,8 @@ def _message(uid: int, sender: str) -> IncomingMessage:
 
 
 class FakeReader:
-    def __init__(self, messages=None, cursor=118, fail=None):
+    def __init__(self, messages=None, cursor=118, fail=None, owns=True):
+        self.owns = owns
         self.messages = messages or []
         self.cursor = cursor
         self.fail = fail
@@ -43,6 +44,9 @@ class FakeReader:
 
     async def current_cursor(self, inbox):
         return self.cursor
+
+    def owns_cursor(self, cursor):
+        return self.owns
 
 
 @pytest.fixture
@@ -82,7 +86,7 @@ def fake_repo(monkeypatch):
 @pytest.mark.anyio
 async def test_first_poll_skips_existing_mail(monkeypatch, fake_repo):
     reader = FakeReader(messages=[_message(5, "old@example.com")], cursor=118)
-    monkeypatch.setattr(poller, "get_reader", lambda: reader)
+    monkeypatch.setattr(poller, "get_reader", lambda *_: reader)
 
     stats, error = await poller.poll_inbox(_inbox(0))
 
@@ -94,7 +98,7 @@ async def test_first_poll_skips_existing_mail(monkeypatch, fake_repo):
 @pytest.mark.anyio
 async def test_empty_folder_polls_normally(monkeypatch, fake_repo):
     reader = FakeReader(cursor=0)
-    monkeypatch.setattr(poller, "get_reader", lambda: reader)
+    monkeypatch.setattr(poller, "get_reader", lambda *_: reader)
 
     assert await poller.poll_inbox(_inbox(0)) == ({}, None)
     assert reader.fetched is True
@@ -106,7 +110,7 @@ async def test_unrelated_mail_is_neither_stored_nor_acted_on(monkeypatch, fake_r
         _message(119, "newsletter@example.com"),
         _message(120, "lead@example.com"),
     ])
-    monkeypatch.setattr(poller, "get_reader", lambda: reader)
+    monkeypatch.setattr(poller, "get_reader", lambda *_: reader)
 
     stats, error = await poller.poll_inbox(_inbox(118))
 
@@ -121,7 +125,7 @@ async def test_unrelated_mail_is_neither_stored_nor_acted_on(monkeypatch, fake_r
 @pytest.mark.anyio
 async def test_failure_reason_is_reported(monkeypatch, fake_repo):
     reader = FakeReader(fail=MailError("IMAP auth failed for me@example.com: bad password"))
-    monkeypatch.setattr(poller, "get_reader", lambda: reader)
+    monkeypatch.setattr(poller, "get_reader", lambda *_: reader)
 
     async def inboxes():
         return [_inbox(118)]
@@ -140,7 +144,7 @@ async def test_send_only_inbox_is_not_read(monkeypatch, fake_repo):
     """inboxes.config {"read": false}: a mailbox we cannot log in to (its
     replies are forwarded to an inbox that is read) is skipped, no error."""
     reader = FakeReader(fail=MailError("IMAP auth failed"))
-    monkeypatch.setattr(poller, "get_reader", lambda: reader)
+    monkeypatch.setattr(poller, "get_reader", lambda *_: reader)
     inbox = _inbox(118)
     inbox.config = {"read": False}
 
@@ -174,3 +178,29 @@ async def test_nurture_job_alerts_only_after_repeated_failures(monkeypatch):
     outcome["fail"] = True
     await run(); await run(); await run()
     assert sent == [3]
+
+
+@pytest.mark.anyio
+async def test_an_inbox_moved_to_another_reader_restarts_tracking(monkeypatch, fake_repo):
+    """An IMAP UID left in poll_cursor is not read by Graph as a 1970 time
+    (which would import the whole mailbox): tracking starts from now."""
+    reader = FakeReader(messages=[_message(5, "old@example.com")], cursor=1_760_000_000, owns=False)
+    monkeypatch.setattr(poller, "get_reader", lambda *_: reader)
+
+    assert await poller.poll_inbox(_inbox(4321)) == ({"tracking_started": 1}, None)
+    assert fake_repo["cursor"] == [1_760_000_000] and reader.fetched is False
+
+
+def test_reader_is_chosen_per_inbox(monkeypatch):
+    from dataclasses import replace
+    from app.mail import factory
+    from app.mail.graph_reader import GraphReader
+    from app.mail.imap_reader import IMAPReader
+
+    monkeypatch.setattr(factory, "_readers", {})
+    gmail = _inbox(0)
+    office = replace(_inbox(0), config={"reader": "graph"})
+    assert isinstance(factory.get_reader(gmail), IMAPReader)      # MAIL_READER default: imap
+    assert isinstance(factory.get_reader(office), GraphReader)
+    assert factory.get_reader(office) is factory.get_reader(office)
+    assert GraphReader().owns_cursor(1_760_000_000) and not GraphReader().owns_cursor(4321)

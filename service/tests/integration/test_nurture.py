@@ -83,7 +83,7 @@ async def test_scores_enroll_switch_tracks_and_hand_off(database):
     from app.nurture import enroll, exits
 
     pg = database
-    await configure()
+    await configure(auto_enroll=True)
     ciso = await add_lead(pg, "N-1", "ciso@northwind.com", "Chief Information Security Officer", "Cold")
     outbound = await add_lead(pg, "N-2", "outbound@northwind.com", "IT Manager", "Cold")
     blocked = await add_lead(pg, "N-3", "gone@northwind.com", "IT Manager", "Cold")
@@ -134,7 +134,7 @@ async def test_cooldown_reconcile_and_test_mode(database):
     from app.nurture import repo as nrepo
 
     pg = database
-    cfg = await configure()
+    cfg = await configure(auto_enroll=True)
     lead = await add_lead(pg, "C-1", "done@northwind.com", "HR Manager", "Cold")
     assert await enroll.enroll_lead(lead, "Cold", "manual", cfg, MON) == "enrolled"
     e = await enrollment(pg, lead)

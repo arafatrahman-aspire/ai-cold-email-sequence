@@ -752,9 +752,10 @@ api -X PUT localhost:8080/settings/triage -d '{"value":{
 
 ### D4.1 Enroll leads already Warm or Cold
 
-Only score *changes* enroll automatically. For leads that were already Warm or
-Cold when nurture was switched on: **Leads → Enroll eligible leads**, or tick
-leads and enroll them.
+Nobody is enrolled automatically unless **Settings → Who is enrolled →
+Enroll on score change** is on (off by default); even then only score
+*changes* enroll. Otherwise, and for leads that were already Warm or Cold:
+**Leads**, tick the leads and enroll them (or remove them the same way).
 ```bash
 api localhost:8080/nurture/eligible
 api -X POST localhost:8080/nurture/enroll

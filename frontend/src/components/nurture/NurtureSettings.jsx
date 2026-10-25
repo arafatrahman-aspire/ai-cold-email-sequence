@@ -147,7 +147,7 @@ export default function NurtureSettings() {
 
       <Card title="Who is enrolled">
         <div className="set-rows">
-          <Row label="Enroll on score change" description="When a lead's score becomes Warm or Cold. Off: only the Enroll button on Leads enrolls.">
+          <Row label="Enroll on score change" description="When a lead's score becomes Warm or Cold. Off (the default): only the Enroll button on Leads enrolls.">
             <Toggle label="Enroll on score change" checked={draft.auto_enroll} onChange={(v) => set({ auto_enroll: v })} />
           </Row>
           <Row label="Cooldown after nurture" error={errors.cooldown} description="A lead who finished or left nurture is not enrolled again for this long.">

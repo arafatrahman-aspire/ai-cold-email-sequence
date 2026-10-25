@@ -19,6 +19,9 @@ from app.mail.graph_sender import GRAPH_BASE, get_token_cache
 
 log = logging.getLogger(__name__)
 
+# Epoch seconds before 2001: an IMAP UID, not a Graph cursor.
+EPOCH_FLOOR = 1_000_000_000
+
 
 class GraphReader(MailReader):
     name = "graph"
@@ -28,6 +31,9 @@ class GraphReader(MailReader):
 
     async def current_cursor(self, inbox: Inbox) -> int:
         return int(datetime.now(timezone.utc).timestamp())
+
+    def owns_cursor(self, cursor: int) -> bool:
+        return cursor >= EPOCH_FLOOR
 
     async def fetch_new(self, inbox: Inbox, limit: int = 50) -> list[IncomingMessage]:
         token = await get_token_cache().token(self._client)

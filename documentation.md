@@ -740,7 +740,7 @@ are taken and no reply drafts are written):
 | Field | Default | Meaning |
 |---|---|---|
 | `paused` | `false` | Pause-all |
-| `auto_enroll` | `true` | Enroll on score change |
+| `auto_enroll` | `false` | Enroll on score change (off: only the Enroll button on Leads enrolls) |
 | `test_mode` | off, 1 min/day, empty list | Test mode |
 | `cadence` | see D3.2 | Days per track |
 | `cooldown_days` | `90` | Wait before a lead may rejoin |

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from app.config import get_settings
-from app.mail.base import MailError, MailReader, MailSender
+from app.mail.base import Inbox, MailError, MailReader, MailSender
 from app.mail.brevo_sender import BrevoSender
 from app.mail.graph_reader import GraphReader
 from app.mail.graph_sender import GraphSender
@@ -13,7 +13,7 @@ from app.mail.imap_reader import IMAPReader
 from app.mail.smtp_sender import SMTPSender
 
 _sender: Optional[MailSender] = None
-_reader: Optional[MailReader] = None
+_readers: dict[str, MailReader] = {}
 
 
 def get_sender() -> MailSender:
@@ -31,24 +31,26 @@ def get_sender() -> MailSender:
     return _sender
 
 
-def get_reader() -> MailReader:
-    global _reader
-    if _reader is None:
-        name = get_settings().mail_reader
+def get_reader(inbox: Optional[Inbox] = None) -> MailReader:
+    """The reader for ``inbox``: its ``config.reader`` ("imap" | "graph") if
+    set, else MAIL_READER. So a Microsoft 365 inbox can be read through Graph
+    while a Gmail inbox is still read over IMAP."""
+    name = str(((inbox.config or {}) if inbox else {}).get("reader") or get_settings().mail_reader)
+    if name not in _readers:
         if name == "imap":
-            _reader = IMAPReader()
+            _readers[name] = IMAPReader()
         elif name == "graph":
-            _reader = GraphReader()
+            _readers[name] = GraphReader()
         else:
-            raise MailError(f"unknown MAIL_READER: {name}", permanent=True)
-    return _reader
+            raise MailError(f"unknown mail reader: {name}", permanent=True)
+    return _readers[name]
 
 
 async def close_transports() -> None:
-    global _sender, _reader
+    global _sender
     if _sender is not None:
         await _sender.aclose()
         _sender = None
-    if _reader is not None:
-        await _reader.aclose()
-        _reader = None
+    for reader in _readers.values():
+        await reader.aclose()
+    _readers.clear()
