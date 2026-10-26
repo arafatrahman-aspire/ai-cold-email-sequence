@@ -27,6 +27,7 @@ never altered. The single write to a shared table anywhere is setting
 | `0017_campaigns.sql` | Campaigns: 2 new tables (`campaigns`, `campaign_leads`). Two sending functions get one extra line each, marked `-- NEW`, so a paused campaign's emails wait |
 | `0018_cascading.sql` | Deleting an enrollment now deletes all of that lead's data (emails, replies, drafts, meetings, nurture, referred contact). The suppression list is kept. No data is changed when you run it |
 | `0019_reminders_and_engagement.sql` | Day-before meeting reminders (`meetings.reminder_sent_at`), and Brevo engagement (1 new table, `email_events`: delivered, opened, clicked, bounced, spam). No data is changed |
+| `0020_reply_handled.sql` | A reply that needed a person stops showing "Needs you" once its answer is approved or someone marks it handled |
 
 `0017` replaces two functions first defined in `0001` and `0004`. If you ever
 re-run `0001` or `0004`, run `0017` again afterwards.

@@ -145,12 +145,15 @@ function splitQuoted(text) {
 }
 
 const replyCategory = (r) => r.human_category || r.category
-const needsYou = (r, draft) => ['needs_human', 'failed'].includes(r.triage_status) || draft?.status === 'pending'
+// A person already answered it (approved or sent): it needs nobody now.
+const answered = (draft) => ['approved', 'sent'].includes(draft?.status)
+const unresolved = (r, draft) => ['needs_human', 'failed'].includes(r.triage_status) && !answered(draft)
+const needsYou = (r, draft) => unresolved(r, draft) || draft?.status === 'pending'
 
 // One row of the list: who, what, how urgent.
 function ReplyRow({ reply, draft, active, onSelect }) {
   const [tone, label] = CATEGORIES[replyCategory(reply)] || ['neutral', 'Not sorted']
-  const urgent = ['needs_human', 'failed'].includes(reply.triage_status)
+  const urgent = unresolved(reply, draft)
   return (
     <li id={`row-${reply.id}`}>
       <button className={`inbox-row ${active ? 'is-active' : ''} ${urgent || draft?.status === 'pending' ? 'is-attention' : ''}`}
@@ -216,6 +219,11 @@ function ReplyDetail({ reply, draft, onChanged, now }) {
     await api.run('triage') // act on it now instead of within the minute
     return true
   })
+  const [{ busy: handling, error: handleError }, markHandled] = useAction(async () => {
+    await api.markHandled(reply.id)
+    toast.success('Marked as handled')
+    onChanged()
+  })
   const change = async (cat) => {
     const what = cat ? `Sort this reply as "${CATEGORIES[cat][1]}" and act on it` : 'Let the AI read this reply again and act on it'
     if (!(await confirmDialog(`${what}?\n\nA new answer may be drafted; it replaces any draft still waiting for this lead. Nothing is sent without the usual delay or your approval.`))) return
@@ -237,7 +245,7 @@ function ReplyDetail({ reply, draft, onChanged, now }) {
         <div className="detail-meta">
           <span className="badge-row">
             {category && <Badge tone={tone}>{label}</Badge>}
-            {reply.triage_status !== 'done' && <Badge tone={sTone}>{sLabel}</Badge>}
+            {reply.triage_status !== 'done' && !answered(draft) && <Badge tone={sTone}>{sLabel}</Badge>}
           </span>
           <span className="muted">
             {shortDateTime(reply.received_at)}
@@ -265,12 +273,18 @@ function ReplyDetail({ reply, draft, onChanged, now }) {
             title="The AI reads this reply again from scratch, e.g. after it failed or after you fixed the lead's details">
             {busy ? <Spinner /> : null} Read again
           </button>
+          {unresolved(reply, draft) && (
+            <button className="btn btn-sm btn-primary" disabled={handling} onClick={() => markHandled()}
+              title="You dealt with it (for example outside the app): it stops showing as Needs you">
+              {handling ? <Spinner /> : null} Mark as handled
+            </button>
+          )}
           {reply.gmail_link && (
             <a className="btn btn-sm" href={reply.gmail_link} target="_blank" rel="noreferrer">Open in Gmail ↗</a>
           )}
         </div>
       </div>
-      <ErrorNote error={error} />
+      <ErrorNote error={error || handleError} />
 
       {tab === 'reply' && (
         <div className="detail-body">

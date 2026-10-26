@@ -479,6 +479,17 @@ async def save_triage(
     )
 
 
+async def mark_event_handled(event_id: str | None = None, draft_id: str | None = None) -> bool:
+    """A reply that needed a person is done (0020). False, never an error,
+    before that migration is run."""
+    try:
+        return bool(await db.rpc("mark_event_handled", p_event_id=event_id, p_draft_id=draft_id))
+    except db.DatabaseError as exc:
+        if _not_installed(exc):
+            return False
+        raise
+
+
 async def retriage_event(event_id: str, category: str | None = None) -> bool:
     return bool(await db.rpc("retriage_event", p_event_id=event_id, p_category=category))
 

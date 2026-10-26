@@ -949,3 +949,21 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); 
 .engage-list li { display: grid; grid-template-columns: 140px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--grid); font-size: 14px; }
 .engage-what { overflow-wrap: anywhere; }
 @media (max-width: 640px) { .engage-list li { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+
+/* --- Email preview: as an inbox shows it ------------------------------------- */
+.mail-mock {
+  margin: 0 auto; width: 100%; background: #ffffff; color: #1f2937; border-radius: 14px; overflow: hidden;
+  border: 1px solid var(--border); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18); transition: max-width 0.2s ease;
+}
+.mail-mock-mobile { max-width: 390px; border-radius: 28px; border: 8px solid #111827; }
+.mail-mock-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px 6px; }
+.mail-mock-who { display: flex; flex-direction: column; flex: 1; min-width: 0; font-size: 14px; line-height: 1.35; }
+.mail-mock-who strong { color: #111827; }
+.mail-mock-addr, .mail-mock-to, .mail-mock-time { color: #6b7280; font-size: 12.5px; }
+.mail-mock-addr { overflow-wrap: anywhere; }
+.mail-mock-time { flex: none; align-self: flex-start; }
+.mail-mock-subject { margin: 6px 20px 4px; font: 600 18px/1.35 var(--font); color: #111827; }
+.mail-mock-body { padding: 4px 8px 12px; }
+.mail-mock .email-iframe { display: block; width: 100%; border: 0; border-radius: 0; background: #ffffff; }
+.mail-mock .email-plain { border: 0; color: #1f2937; background: #f9fafb; max-height: none; }
+.mail-mock-mobile .mail-mock-subject { font-size: 16px; }

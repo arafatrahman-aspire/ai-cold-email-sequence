@@ -126,6 +126,7 @@ export const api = {
   editDraft: (id, subject, body) => request('PUT', `/triage/drafts/${encodeURIComponent(id)}`, { subject, body }),
   approveDraft: (id) => request('POST', `/triage/drafts/${encodeURIComponent(id)}/approve`),
   rejectDraft: (id) => request('POST', `/triage/drafts/${encodeURIComponent(id)}/reject`),
+  markHandled: (eventId) => request('POST', `/triage/events/${encodeURIComponent(eventId)}/handled`),
   redraft: (eventId, category, instructions) =>
     request('POST', `/triage/events/${encodeURIComponent(eventId)}/redraft`, { category: category || null, instructions: instructions || '' }),
   eventTimes: (id) => request('GET', `/triage/events/${encodeURIComponent(id)}/times`),

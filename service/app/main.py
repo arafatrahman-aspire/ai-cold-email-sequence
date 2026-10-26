@@ -401,6 +401,23 @@ async def save_email_design(style: EmailStyle, user: dict = Depends(require_user
 
 @app.post("/email-design/render", dependencies=[Depends(require_user)])
 async def render_email(req: RenderRequest) -> dict:
+    """The email as it would arrive, plus who it would come from (for the
+    inbox-style preview)."""
+    from app.nurture import sending as nsending
+
+    out = await _render_email(req)
+    if req.kind == "nurture":
+        box = await nsending.sending_inbox()
+    else:
+        inboxes = await repo.active_inboxes()
+        box = inboxes[0] if inboxes else None
+    style = await settings_store.email_style()
+    out.setdefault("from_name", style.get("name") or (box.display_name if box else "") or "")
+    out.setdefault("from_email", box.email if box else "")
+    return out
+
+
+async def _render_email(req: RenderRequest) -> dict:
     """An email exactly as it would be sent (empty fields: a sample), as
     {subject, html, text}. Nothing is sent."""
     from app.mail import templates
@@ -905,6 +922,13 @@ class RedraftRequest(RetriageRequest):
     instructions: str = Field(default="", max_length=800)
 
 
+@app.post("/triage/events/{event_id}/handled", dependencies=[Depends(require_user)])
+async def triage_mark_handled(event_id: UUID) -> dict:
+    """A person dealt with this reply (e.g. outside the app): it stops
+    showing as "Needs you"."""
+    return {"event_id": str(event_id), "changed": await repo.mark_event_handled(event_id=str(event_id))}
+
+
 @app.post("/triage/events/{event_id}/redraft", dependencies=[Depends(require_user)])
 async def triage_redraft(event_id: UUID, request: RedraftRequest | None = None) -> dict:
     """Write a new answer to a reply (after a rejected one, or to replace the
@@ -950,6 +974,8 @@ async def triage_approve_draft(draft_id: UUID, user: dict = Depends(require_user
     """Send it at the next triage run (within a minute)."""
     if not await repo.decide_draft(str(draft_id), "approve", user.get("email") or user.get("id", "")):
         raise HTTPException(status_code=409, detail="this draft is no longer waiting")
+    # A person answered it: the reply no longer needs anyone.
+    await repo.mark_event_handled(draft_id=str(draft_id))
     return {"id": str(draft_id), "status": "approved"}
 
 

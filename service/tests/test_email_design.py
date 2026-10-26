@@ -1,6 +1,7 @@
 """How emails look (app/mail/templates.py) and the design endpoints."""
 
 import os
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -97,14 +98,19 @@ def _flips_in_dark_mode(html: str) -> bool:
 
 
 def test_plain_layout_is_an_ordinary_email():
-    """Plain looks like an email typed in Outlook or Gmail: no background or
-    text colour (the reader's client picks them, so dark mode just works),
-    no boxes, and the signature as text lines."""
+    """Plain reads like a person's email but is built properly: a 600px
+    table column, one font, a signature set off by a short brand-colour line.
+    No page or text colour (the reader's client picks them, so dark mode just
+    works), no <style> block, images or buttons."""
     sig = templates.Signature(name="Alex Rivera", title="Sales", company="Aspire Tech", website="aspiretss.com")
-    mail = templates.personal("Hi Dana,\n\nHello.", sig, sign_off="Best,", opt_out="No thanks?")
-    assert "background" not in mail.html and "<table" not in mail.html and "<style" not in mail.html
-    assert "Best,<br><b>Alex Rivera</b><br>Sales | Aspire Tech<br>" in mail.html
-    assert "<p" in mail.html and "No thanks?" in mail.html
+    mail = templates.personal("Hi Dana,\n\nHello.", sig, sign_off="Best,", opt_out="No thanks?", accent="#1a5fb4")
+    html = mail.html
+    assert 'max-width:600px' in html and "<style" not in html and "<img" not in html
+    body = html.split("<body", 1)[1].split("<a ", 1)[0]
+    assert "<body style=\"margin:0;padding:0\">" in html and not re.search(r"(?<!-)color:#", body)  # no text colour
+    assert "background-color:#1a5fb4" in html                        # the signature line, nothing else
+    assert "<b>Alex Rivera</b>" in html and "Sales | Aspire Tech" in html and "No thanks?" in html
+    assert mail.text.endswith("Best,\nAlex Rivera\nSales | Aspire Tech\naspiretss.com\n\nNo thanks?")
 
 
 def test_card_layout_follows_dark_mode():

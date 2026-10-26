@@ -214,24 +214,39 @@ def personal(body: str, signature: Signature, *, sign_off: str = "", opt_out: st
 </body></html>"""
         return Email(text=text, html=doc)
 
-    # Plain: what a person's email client sends. No background, no text colour
-    # (the reader's client picks both, so dark mode just works), no boxes,
-    # normal-size type and a text signature. Designed-looking HTML is one of
-    # the signals that sends cold email to Gmail's Promotions tab.
-    closing = "<br>".join(([e(sign_off)] if sign_off else []) + signature.lines_html(accent))
-    sign_html = f'<p style="margin:0">{closing}</p>' if closing else ""
-    opt_html = (f'<p style="margin:20px 0 0;font-size:12px;color:#888888">{e(opt_out)}</p>'
+    # Plain: reads like a person's email, built like a professional one: a
+    # table-based 600px column (Outlook keeps it), one font, roomy line
+    # height, and a signature set off by a short line in the brand colour.
+    # No background or body text colour (the reader's client picks both, so
+    # dark mode just works), no banner, images or buttons: designed-looking
+    # cold email is what sends it to Gmail's Promotions tab.
+    font = "'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif"
+    sig_lines = signature.lines_html(accent)
+    sig_html = ""
+    if sig_lines:
+        name, rest = sig_lines[0], sig_lines[1:]
+        sig_html = (f'<div style="width:28px;height:2px;line-height:2px;font-size:0;background-color:{accent};'
+                    f'margin:20px 0 12px">&nbsp;</div>'
+                    f'<p style="margin:0;font-size:15px">{name}</p>'
+                    + "".join(f'<p style="margin:2px 0 0;font-size:13px;opacity:0.75">{line}</p>' for line in rest))
+    sign_html = f'<p style="margin:0">{e(sign_off)}</p>' if sign_off else ""
+    opt_html = (f'<p style="margin:24px 0 0;font-size:12px;opacity:0.6">{e(opt_out)}</p>'
                 if opt_out else "")
     doc = f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
 <title>{e(subject)}</title>
 </head>
 <body style="margin:0;padding:0">
-<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;max-width:600px">
-{paragraphs(body, accent)}{sign_html}{opt_html}
-</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+<tr><td style="padding:12px 16px">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px">
+<tr><td style="font-family:{font};font-size:15px;line-height:1.6;text-align:left">
+{paragraphs(body, accent)}{sign_html}{sig_html}{opt_html}
+</td></tr></table>
+</td></tr></table>
 </body></html>"""
     return Email(text=text, html=doc)
 
