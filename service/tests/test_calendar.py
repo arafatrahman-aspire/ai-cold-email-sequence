@@ -115,7 +115,7 @@ class FakeGraph:
                     windows = [(day + timedelta(hours=a), day + timedelta(hours=b))]
                     for appt in self.appointments:
                         if sid in appt["staffMemberIds"]:
-                            s, e = self._t(appt["start"]), self._t(appt["end"])
+                            s, e = self._t(appt["startDateTime"]), self._t(appt["endDateTime"])
                             windows = [w for ws, we in windows for w in
                                        ((ws, min(we, s)), (max(ws, e), we)) if w[1] > w[0]]
                     out += [(max(ws, start), min(we, end)) for ws, we in windows if we > start and ws < end]
@@ -157,6 +157,9 @@ class FakeGraph:
                 {"staffId": s, "availabilityItems": self._free(s, start, end)} for s in body["staffIds"]]})
         if path == f"{base}/appointments" and request.method == "POST":
             body = json.loads(request.content)
+            if "startDateTime" not in body or "endDateTime" not in body:
+                # What real Graph does with the docs' old "start"/"end" names.
+                return httpx.Response(500, json={"error": {"code": "UnknownError", "message": ""}})
             appt = {**body, "id": f"appt-{len(self.appointments) + 1}",
                     "createdDateTime": f"2026-10-01T00:00:{len(self.appointments):02d}Z",
                     "joinWebUrl": "https://teams.microsoft.com/l/meetup-join/x"}
@@ -168,7 +171,7 @@ class FakeGraph:
             start = datetime.fromisoformat(request.url.params["start"].replace("Z", "+00:00"))
             end = datetime.fromisoformat(request.url.params["end"].replace("Z", "+00:00"))
             return httpx.Response(200, json={"value": [
-                a for a in self.appointments if start <= self._t(a["start"]) < end]})
+                a for a in self.appointments if start <= self._t(a["startDateTime"]) < end]})
         return httpx.Response(404, json={"error": {"code": "NotFound", "message": path}})
 
 
@@ -401,7 +404,8 @@ async def test_msbookings_requests_match_the_api():
     post = next(r for r in server.requests if r.url.path.endswith("/appointments"))
     body = json.loads(post.content)
     assert body["serviceId"] == SERVICE and body["staffMemberIds"] == ["s1"]
-    assert body["start"] == {"dateTime": "2026-10-05T14:00:00", "timeZone": "UTC"}
+    assert body["startDateTime"] == {"dateTime": "2026-10-05T14:00:00", "timeZone": "UTC"}
+    assert "start" not in body and "end" not in body
     assert body["isLocationOnline"] is True
     [customer] = body["customers"]
     assert (customer["name"], customer["emailAddress"], customer["timeZone"]) == (DANA.name, DANA.email, DANA.timezone)
@@ -477,3 +481,21 @@ async def test_msbookings_real_failure_is_still_reported():
     cal = MSBookingsProvider("t", "c", "s", BIZ, SERVICE, transport=httpx.MockTransport(refuse))
     with pytest.raises(CalendarError, match="500"):
         await cal.book(MON + timedelta(hours=10), DANA)
+
+
+@pytest.mark.anyio
+async def test_msbookings_reads_appointments_made_in_the_bookings_app():
+    """Graph v1.0 answers with startDateTime / endDateTime: a meeting booked
+    by hand in Bookings must show up (it was skipped while reading "start")."""
+    server = FakeGraph()
+    server.appointments.append({
+        "id": "manual-1", "serviceId": SERVICE, "staffMemberIds": ["s1"],
+        "startDateTime": {"dateTime": "2026-10-07T10:30:00.0000000Z", "timeZone": "UTC"},
+        "endDateTime": {"dateTime": "2026-10-07T11:00:00.0000000Z", "timeZone": "UTC"},
+        "customers": [{"name": "Lea", "emailAddress": "lea@x.com"}],
+        "joinWebUrl": "https://teams.microsoft.com/l/meetup-join/m", "createdDateTime": "2026-10-01T00:00:00Z",
+    })
+    cal, _ = msbookings(server)
+    [b] = await cal.list_bookings(MON)
+    assert (b.external_id, b.attendee_email, b.ours) == ("manual-1", "lea@x.com", True)
+    assert b.start == datetime(2026, 10, 7, 10, 30, tzinfo=timezone.utc) and b.end - b.start == timedelta(minutes=30)

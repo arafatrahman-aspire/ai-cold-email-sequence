@@ -221,3 +221,20 @@ def test_draft_never_invents_a_meeting_time_or_invite():
     booked = _input(kind="booking_confirmation", booked="Tuesday 6 October, 10:00-10:30 (UTC)")
     assert drafting._ensure("Hi Dana,\n\nYou're booked for Tuesday 6 October, 10:00-10:30 (UTC). "
                             "I'll send the invite shortly.\n\nAlex", booked)
+
+
+def test_redraft_instructions_reach_the_prompt():
+    from app.triage.drafting import DraftInput, _prompt
+    base = dict(kind="meeting_offer", first_name="Dana", sign_off="Alex", reply_subject="Re: hi",
+                reply_body="Sounds good", slot_lines=[])
+    assert "Instructions from our team" not in _prompt(DraftInput(**base))
+    steered = _prompt(DraftInput(**base, guidance="Shorter. Offer Thursday afternoon."))
+    assert "Instructions from our team" in steered and "Offer Thursday afternoon." in steered
+    # The instructions come before their reply, which stays last.
+    assert steered.index("Offer Thursday") < steered.index("Their new reply")
+
+
+def test_redraft_guidance_is_used_once():
+    from app.workers import triage
+    triage.set_guidance("ev-1", "Shorter.")
+    assert triage._guidance.pop("ev-1", None) == "Shorter." and triage._guidance.pop("ev-1", None) is None

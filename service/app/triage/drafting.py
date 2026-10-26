@@ -115,6 +115,9 @@ class DraftInput:
     # The answer library (Reply triage -> Answer library): approved wording the
     # AI may reuse when the reply asks about the same thing.
     snippets: list[dict] = field(default_factory=list)
+    # A person's instructions for this one answer (Redraft): "shorter",
+    # "propose Thursday instead". They steer the AI within its rules.
+    guidance: Optional[str] = None
 
 
 def reply_subject(subject: str) -> str:
@@ -229,6 +232,9 @@ def _prompt(d: DraftInput) -> str:
             "Never copy their names, companies, dates or times:\n"
             + "\n---\n".join(e["body"][:1200] for e in d.examples[:3])
         )
+    if d.guidance:
+        parts.append("Instructions from our team for this answer. Follow them, within the rules above:\n"
+                     + d.guidance.strip()[:800])
     if d.history:
         parts.append("The conversation so far, oldest first:\n" + d.history)
     parts.append(f"Their new reply (the one you are answering):\nSubject: {d.reply_subject}\n{d.reply_body[:2000]}")

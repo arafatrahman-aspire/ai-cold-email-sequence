@@ -92,6 +92,12 @@ def _graph_time(data: Optional[dict[str, Any]], fallback_tz) -> Optional[datetim
         return value.replace(tzinfo=fallback_tz)
 
 
+def _when(item: dict[str, Any], which: str, fallback_tz) -> Optional[datetime]:
+    """An appointment's start or end: v1.0 says startDateTime / endDateTime;
+    older answers (and the docs' examples) say start / end."""
+    return _graph_time(item.get(f"{which}DateTime") or item.get(which), fallback_tz)
+
+
 def _merge(windows: Iterable[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
     out: list[tuple[datetime, datetime]] = []
     for start, end in sorted(windows):
@@ -348,8 +354,10 @@ class MSBookingsProvider(CalendarProvider):
             "serviceId": self._service_id,
             "serviceName": svc.name,
             "staffMemberIds": [staff],
-            "start": {"dateTime": _utc_naive(slot_start), "timeZone": "UTC"},
-            "end": {"dateTime": _utc_naive(end), "timeZone": "UTC"},
+            # v1.0 names. The docs' older example uses "start"/"end"; Graph then
+            # sees an appointment without a time and fails with a bare 500.
+            "startDateTime": {"dateTime": _utc_naive(slot_start), "timeZone": "UTC"},
+            "endDateTime": {"dateTime": _utc_naive(end), "timeZone": "UTC"},
             "preBuffer": f"PT{int(svc.pre.total_seconds())}S",
             "postBuffer": f"PT{int(svc.post.total_seconds())}S",
             "isLocationOnline": svc.online,
@@ -382,8 +390,8 @@ class MSBookingsProvider(CalendarProvider):
         return Booking(
             provider=self.name,
             external_id=str(data["id"]),
-            start=_graph_time(data.get("start"), self._tz) or slot_start,
-            end=_graph_time(data.get("end"), self._tz) or end,
+            start=_when(data, "start", self._tz) or slot_start,
+            end=_when(data, "end", self._tz) or end,
             meeting_url=data.get("joinWebUrl") or data.get("anonymousJoinWebUrl") or None,
         )
 
@@ -394,7 +402,7 @@ class MSBookingsProvider(CalendarProvider):
         except CalendarError:
             return None
         for item in items:
-            begins = _graph_time(item.get("start"), self._tz)
+            begins = _when(item, "start", self._tz)
             emails = {(c.get("emailAddress") or "").lower() for c in item.get("customers") or []}
             emails.add((item.get("customerEmailAddress") or "").lower())
             if (begins and abs((begins - start).total_seconds()) < 60 and email.lower() in emails
@@ -425,14 +433,14 @@ class MSBookingsProvider(CalendarProvider):
         await self._svc()  # also keeps booking_link() filled for the sync callers
         out: list[RemoteBooking] = []
         for item in await self._appointments(starting_after, starting_after + LIST_HORIZON):
-            start = _graph_time(item.get("start"), self._tz)
+            start = _when(item, "start", self._tz)
             if not item.get("id") or start is None or start < starting_after:
                 continue
             guest = next((c for c in item.get("customers") or [] if c.get("emailAddress")), {})
             out.append(RemoteBooking(
                 external_id=str(item["id"]),
                 start=start,
-                end=_graph_time(item.get("end"), self._tz) or start,
+                end=_when(item, "end", self._tz) or start,
                 status="booked",  # cancelled appointments are deleted, not listed
                 attendee_email=guest.get("emailAddress") or item.get("customerEmailAddress"),
                 attendee_name=guest.get("name") or item.get("customerName"),

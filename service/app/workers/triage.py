@@ -74,6 +74,16 @@ def _split_name(name: Optional[str]) -> tuple[Optional[str], Optional[str]]:
 # Triage of one reply
 # ---------------------------------------------------------------------------
 
+# Redraft instructions waiting for their reply's next triage, by event id. The
+# redraft endpoint runs triage straight away in this process, so they are
+# used within the same request; nothing needs to survive a restart.
+_guidance: dict[str, str] = {}
+
+
+def set_guidance(event_id: str, text: str) -> None:
+    _guidance[event_id] = text
+
+
 async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
                         now: Optional[datetime] = None) -> str:
     """Triage one reply and act on it. Returns the outcome for the tick stats."""
@@ -282,6 +292,7 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
                 referral=referral_name,
                 snooze_days=int(cfg["not_now_days"]),
                 history=history_text,
+                guidance=_guidance.pop(event_id, None),
                 examples=await repo.draft_examples(draft_kind),
                 snippets=await settings_store.triage_snippets(),
             ))

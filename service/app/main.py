@@ -898,6 +898,25 @@ async def save_triage_snippets(request: SnippetList, user: dict = Depends(requir
     return {"snippets": snippets}
 
 
+class RedraftRequest(RetriageRequest):
+    # Optional steer for the AI: "shorter", "offer Thursday instead".
+    instructions: str = Field(default="", max_length=800)
+
+
+@app.post("/triage/events/{event_id}/redraft", dependencies=[Depends(require_user)])
+async def triage_redraft(event_id: UUID, request: RedraftRequest | None = None) -> dict:
+    """Write a new answer to a reply (after a rejected one, or to replace the
+    one waiting), keeping its category, with optional instructions. The new
+    draft replaces any still waiting and follows the usual send rules."""
+    request = request or RedraftRequest()
+    if request.instructions.strip():
+        triage_worker.set_guidance(str(event_id), request.instructions.strip())
+    if not await repo.retriage_event(str(event_id), request.category):
+        raise HTTPException(status_code=404, detail="no reply with that id can be answered again")
+    result = await triage_worker.run_once()
+    return {"event_id": str(event_id), "result": result}
+
+
 @app.post("/triage/events/{event_id}/rerun", dependencies=[Depends(require_user)])
 async def triage_rerun(event_id: UUID, request: RetriageRequest | None = None) -> dict:
     """Triage a reply again, optionally with the correct category.

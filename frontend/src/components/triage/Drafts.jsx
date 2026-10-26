@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api.js'
 import { CATEGORIES, DRAFT_KINDS, relativeTime, shortDateTime } from '../../labels.js'
-import { AutoTextarea, Badge, Card, ErrorNote, Spinner, useAction } from '../ui.jsx'
+import { AutoTextarea, Badge, Card, ErrorNote, Field, Modal, Spinner, toast, useAction } from '../ui.jsx'
 import { LeadLink } from '../LeadJourney.jsx'
 import EmailPreview from '../EmailPreview.jsx'
 
@@ -59,6 +59,49 @@ function useSnippets() {
     api.snippets().then((r) => { snippetCache = r.snippets || []; setSnippets(snippetCache) }).catch(() => {})
   }, [])
   return snippets
+}
+
+// Write a new answer to the same reply, optionally steered ("shorter",
+// "offer Thursday instead"). Keeps the reply's category; the new answer
+// follows the usual send rules.
+function RedraftButton({ draft, onChanged }) {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [{ busy, error }, go] = useAction(async () => {
+    await api.redraft(draft.event_id, draft.category, text.trim())
+    toast.success('New answer written. Review it below.')
+    setOpen(false)
+    setText('')
+    onChanged()
+    return true
+  })
+  return (
+    <>
+      <button className="btn btn-sm" onClick={() => setOpen(true)}>Redraft</button>
+      <Modal open={open} title="Write a new answer" onClose={() => !busy && setOpen(false)}
+        footer={(
+          <>
+            <button className="btn btn-ghost" disabled={busy} onClick={() => setOpen(false)}>Cancel</button>
+            <button className="btn btn-primary" disabled={busy} onClick={() => go()}>
+              {busy ? <Spinner /> : null} Write new answer
+            </button>
+          </>
+        )}>
+        <div className="stack">
+          <p className="modal-text">
+            The AI writes a fresh answer to {draft.to_email}
+            {draft.status === 'pending' ? ', replacing this one' : ''}. If they asked for a time that is free,
+            it is booked. Nothing is sent without your approval or the usual delay.
+          </p>
+          <Field label="Instructions for the AI (optional)"
+            hint="For example: Shorter. Offer Thursday or Friday afternoon. Don't mention pricing.">
+            <AutoTextarea minRows={3} maxLength={800} value={text} onChange={(e) => setText(e.target.value)} autoFocus />
+          </Field>
+          <ErrorNote error={error} />
+        </div>
+      </Modal>
+    </>
+  )
 }
 
 export function DraftCard({ draft, now, onChanged, compact = false }) {
@@ -160,6 +203,7 @@ export function DraftCard({ draft, now, onChanged, compact = false }) {
                 Reject
               </button>
             )}
+            {draft.status === 'pending' && draft.event_id && <RedraftButton draft={draft} onChanged={onChanged} />}
             {dirty && (
               <button className="btn btn-sm" disabled={busy || !subject.trim() || !body.trim()} onClick={() => run('save')}>
                 Save edits
@@ -168,6 +212,11 @@ export function DraftCard({ draft, now, onChanged, compact = false }) {
             <button className="btn btn-primary btn-sm" disabled={busy || !subject.trim() || !body.trim()} onClick={() => run('approve')}>
               {busy ? <Spinner /> : null} {draft.status === 'failed' ? 'Retry send' : dirty ? 'Save & send' : 'Approve & send'}
             </button>
+          </div>
+        )}
+        {['rejected', 'cancelled'].includes(draft.status) && draft.event_id && (
+          <div className="draft-buttons">
+            <RedraftButton draft={draft} onChanged={onChanged} />
           </div>
         )}
       </div>
