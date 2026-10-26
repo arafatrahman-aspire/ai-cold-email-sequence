@@ -118,8 +118,8 @@ export const api = {
 
   // Reply triage (OUT-05)
   triageStats: () => request('GET', '/triage/stats'),
-  triageEvents: (category) =>
-    request('GET', `/triage/events${category ? `?category=${encodeURIComponent(category)}` : ''}`),
+  triageEvents: (category, limit = 200) =>
+    request('GET', `/triage/events?limit=${limit}${category ? `&category=${encodeURIComponent(category)}` : ''}`),
   retriage: (eventId, category) =>
     request('POST', `/triage/events/${encodeURIComponent(eventId)}/rerun`, category ? { category } : {}),
   drafts: (status, limit = 50) => request('GET', `/triage/drafts?status=${encodeURIComponent(status)}&limit=${limit}`),

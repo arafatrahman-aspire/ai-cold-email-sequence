@@ -13,7 +13,7 @@ const DEFAULTS = {
   not_now_days: 60,
   ooo_default_days: 7,
   context_messages: 4,
-  meeting: { slots_to_offer: 2, days_ahead: 7, min_notice_hours: 12 },
+  meeting: { slots_to_offer: 2, days_ahead: 7, min_notice_hours: 12, reminder_hours: 24 },
 }
 
 const isInt = (n, lo, hi) => Number.isInteger(n) && n >= lo && n <= hi
@@ -31,6 +31,7 @@ function validate(d) {
   if (!isInt(m.slots_to_offer, 1, 5)) e.slots = 'Offer 1 to 5 times.'
   if (!isInt(m.days_ahead, 1, 30)) e.days = 'Look 1 to 30 days ahead.'
   if (!isInt(m.min_notice_hours, 0, 168)) e.notice = 'Use 0 to 168 hours.'
+  if (!isInt(m.reminder_hours, 0, 72)) e.reminder = 'Use 0 to 72 hours (0 turns reminders off).'
   return e
 }
 
@@ -200,6 +201,10 @@ export default function TriageSettings() {
           </Row>
           <Row label="Minimum notice" error={errors.notice} description="No slot sooner than this after the reply is drafted.">
             <NumberInput value={draft.meeting.min_notice_hours} min={0} max={168} suffix="hours" onChange={(v) => setMeeting({ min_notice_hours: v })} />
+          </Row>
+          <Row label="Reminder email" error={errors.reminder}
+            description="A short reminder with the join link goes this long before each booked meeting, in the lead's time. 0: no reminders. Leads can reply with a new time and the meeting is moved.">
+            <NumberInput value={draft.meeting.reminder_hours} min={0} max={72} suffix="hours before" onChange={(v) => setMeeting({ reminder_hours: v })} />
           </Row>
         </div>
       </Card>

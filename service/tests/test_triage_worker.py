@@ -475,3 +475,60 @@ async def test_examples_and_answer_library_reach_the_writer(monkeypatch, db, cal
     await run(event("Too expensive for us right now"))
     draft_prompt = gateway.prompts[-1]
     assert "Many teams start small" in draft_prompt and "Plans start at a per-seat price" in draft_prompt
+
+
+
+# --- reschedule -----------------------------------------------------------------
+
+def booked_meeting(monkeypatch, db, booking):
+    db["context"]["has_meeting"] = True
+    meeting = {"lead_id": "lead-1", "provider": "fake", "external_id": booking.external_id, "status": "booked",
+               "start_at": booking.start.isoformat(), "end_at": booking.end.isoformat(),
+               "attendee_email": "dana@northwind.com", "attendee_name": "Dana Okafor", "meeting_url": booking.meeting_url}
+
+    async def upcoming_meeting(lead_id, now):
+        return meeting
+
+    async def sync_meeting(*args):
+        db["calls"].append(("sync_meeting", args, {}))
+        return {"outcome": "updated"}
+
+    monkeypatch.setattr(repo, "upcoming_meeting", upcoming_meeting)
+    monkeypatch.setattr(repo, "sync_meeting", sync_meeting)
+
+
+@pytest.mark.anyio
+async def test_a_new_free_time_moves_the_booked_meeting(monkeypatch, db, calendar):
+    from app.calendar.base import Attendee
+    tue10 = NOW.replace(hour=10) + timedelta(days=1)
+    booking = await calendar.book(tue10, Attendee("Dana Okafor", "dana@northwind.com", "UTC"))
+    booked_meeting(monkeypatch, db, booking)
+    wed14 = NOW.replace(hour=14) + timedelta(days=2)
+    llm(monkeypatch, category="interested", proposed_time=wed14.isoformat())
+
+    await run(event("Can we move it to Wednesday 2pm?"))
+
+    assert list(calendar.bookings) == [wed14]                      # moved, not doubled
+    assert calendar.bookings[wed14].external_id == booking.external_id
+    [(_, args, _)] = calls(db, "sync_meeting")
+    assert (args[1], args[2], args[4]) == (booking.external_id, wed14, "booked")
+    [d] = db["drafts"]
+    assert d["kind"] == "booking_confirmation" and "moved from" in d["body"]
+    assert "rescheduled to" in " ".join(db["saved"]["extracted"]["actions"])
+
+
+@pytest.mark.anyio
+async def test_a_busy_new_time_keeps_the_meeting_and_offers_others(monkeypatch, db, calendar):
+    from app.calendar.base import Attendee
+    tue10 = NOW.replace(hour=10) + timedelta(days=1)
+    booking = await calendar.book(tue10, Attendee("Dana Okafor", "dana@northwind.com", "UTC"))
+    booked_meeting(monkeypatch, db, booking)
+    wed17 = NOW.replace(hour=17) + timedelta(days=2)               # not a slot
+    llm(monkeypatch, category="interested", proposed_time=wed17.isoformat())
+
+    await run(event("Wednesday 5pm instead?"))
+
+    assert list(calendar.bookings) == [tue10]                      # untouched
+    assert not calls(db, "sync_meeting")
+    [d] = db["drafts"]
+    assert d["kind"] == "slot_unavailable" and len(d["offered"]) == 2

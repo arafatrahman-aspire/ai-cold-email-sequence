@@ -22,7 +22,7 @@ from app.nurture import enroll as nurture_enroll
 from app.nurture import jobs as nurture_jobs
 from app.nurture import options as nurture_options
 from app.nurture import replies as nurture_replies
-from app.workers import calendar_sync, intake, poller, sender, triage
+from app.workers import calendar_sync, engagement, intake, poller, reminders, sender, triage
 
 log = logging.getLogger(__name__)
 
@@ -141,6 +141,19 @@ def start() -> AsyncIOScheduler:
         misfire_grace_time=60,
         next_run_time=datetime.now(timezone.utc),
     )
+    # The day-before meeting reminder, and what Brevo saw happen to our emails.
+    for job_id, fn, seconds in (
+        ("reminders", reminders.run_once, s.reminder_interval_seconds),
+        ("engagement", engagement.run_once, s.engagement_interval_seconds),
+    ):
+        _scheduler.add_job(
+            _guard(job_id, fn),
+            trigger=IntervalTrigger(seconds=seconds),
+            id=job_id,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=60,
+        )
 
     if s.nurture_workers:
         _add_nurture_jobs(s)

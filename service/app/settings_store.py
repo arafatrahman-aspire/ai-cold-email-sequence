@@ -46,7 +46,8 @@ DEFAULTS: dict[str, Any] = {
         "not_now_days": 60,
         "ooo_default_days": 7,
         "context_messages": 4,
-        "meeting": {"slots_to_offer": 2, "days_ahead": 7, "min_notice_hours": 12},
+        # reminder_hours: the reminder email goes this long before a meeting (0 = off).
+        "meeting": {"slots_to_offer": 2, "days_ahead": 7, "min_notice_hours": 12, "reminder_hours": 24},
     },
     # How every email looks (app/mail/templates.py). The sender's name is the
     # inbox's display name unless "name" is set here.

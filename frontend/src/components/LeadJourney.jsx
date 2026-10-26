@@ -111,6 +111,64 @@ function TimelineItem({ it }) {
   )
 }
 
+// What Brevo saw happen to our emails (0019: Brevo engagement sync).
+const ENGAGEMENT = {
+  delivered: ['neutral', 'Delivered'],
+  opened: ['good', 'Opened'],
+  clicked: ['good', 'Clicked'],
+  deferred: ['warning', 'Delayed'],
+  soft_bounce: ['warning', 'Soft bounce'],
+  hard_bounce: ['critical', 'Bounced'],
+  blocked: ['critical', 'Blocked'],
+  spam: ['critical', 'Marked as spam'],
+  unsubscribed: ['critical', 'Unsubscribed'],
+}
+
+function Engagement({ events }) {
+  const count = (k) => events.filter((e) => e.event === k).length
+  const problems = events.filter((e) => ['hard_bounce', 'blocked', 'spam', 'unsubscribed'].includes(e.event))
+  return (
+    <Card title="Email engagement" subtitle="What Brevo saw happen to our emails. Opens and clicks appear only while tracking is on in Brevo.">
+      {events.length ? (
+        <>
+          <div className="engage-counts">
+            {['delivered', 'opened', 'clicked'].map((k) => (
+              <div key={k} className="engage-count">
+                <span className="stat-value">{count(k)}</span>
+                <span className="stat-label">{ENGAGEMENT[k][1]}</span>
+              </div>
+            ))}
+            {problems.length > 0 && (
+              <div className="engage-count">
+                <Badge tone="critical">{ENGAGEMENT[problems[0].event][1]}</Badge>
+                <span className="stat-note">the sequence was stopped</span>
+              </div>
+            )}
+          </div>
+          <ul className="engage-list">
+            {events.slice(0, 30).map((ev, i) => {
+              const [tone, label] = ENGAGEMENT[ev.event] || ['neutral', ev.event]
+              return (
+                <li key={`${ev.event}-${ev.at}-${i}`}>
+                  <Badge tone={tone}>{label}</Badge>
+                  <span className="engage-what">
+                    {ev.subject || '(email)'}
+                    {ev.link && <> · <a href={ev.link} target="_blank" rel="noreferrer">{ev.link.replace(/^https?:\/\//, '').slice(0, 60)}</a></>}
+                    {ev.reason && <span className="muted"> · {ev.reason}</span>}
+                  </span>
+                  <span className="muted">{shortDateTime(ev.at)}</span>
+                </li>
+              )
+            })}
+          </ul>
+        </>
+      ) : (
+        <p className="muted">Nothing reported yet. Events from Brevo arrive within about 10 minutes of happening.</p>
+      )}
+    </Card>
+  )
+}
+
 export default function LeadJourney({ leadId }) {
   const [data, setData] = useState(null)
   const [{ busy, error }, load] = useAction(async () => setData(await api.leadJourney(leadId)))
@@ -184,6 +242,8 @@ export default function LeadJourney({ leadId }) {
           <p className="email-body">{nurture[0].handoff_summary}</p>
         </Card>
       )}
+
+      {data?.engagement && <Engagement events={data.engagement} />}
 
       {data && (
         <Card title="Timeline" subtitle="Newest first. Emails we sent, what came back, and what happened in between.">

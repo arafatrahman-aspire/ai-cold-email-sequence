@@ -410,6 +410,35 @@ class MSBookingsProvider(CalendarProvider):
                 return item
         return None
 
+    async def reschedule(self, external_id: str, new_start: datetime, attendee: Attendee,
+                         notes: str = "") -> Booking:
+        """Move the appointment itself (PATCH): same booking and Teams link, new
+        time. Its staff member keeps it when free then; otherwise the next free
+        one in the rotation takes it."""
+        svc = await self._svc()
+        new_start = new_start.astimezone(timezone.utc)
+        path = self._biz(f"/appointments/{quote(external_id, safe='')}")
+        current = await self._call("GET", path, "booking lookup")
+        free = await self._who_is_free(new_start - timedelta(minutes=1), new_start + timedelta(minutes=1))
+        candidates = next((v for t, v in free.items() if abs((t - new_start).total_seconds()) < 60), [])
+        if not candidates:
+            raise CalendarError(f"{new_start.isoformat()} is not free for anyone", slot_taken=True)
+        mine = [str(s) for s in current.get("staffMemberIds") or []]
+        staff = mine[0] if mine and mine[0] in candidates else await self._next_staff(candidates)
+        end = new_start + svc.duration
+        await self._call("PATCH", path, "reschedule", json={
+            "startDateTime": {"dateTime": _utc_naive(new_start), "timeZone": "UTC"},
+            "endDateTime": {"dateTime": _utc_naive(end), "timeZone": "UTC"},
+            "staffMemberIds": [staff],
+        })
+        if staff not in mine:
+            self._last_staff = staff
+        log.info("Microsoft Bookings: %s moved to %s (staff %s)", external_id, new_start, staff)
+        return Booking(
+            provider=self.name, external_id=external_id, start=new_start, end=end,
+            meeting_url=current.get("joinWebUrl") or current.get("anonymousJoinWebUrl") or None,
+        )
+
     def booking_link(self) -> Optional[str]:
         """MSBOOKINGS_BOOKING_URL, else the service's page once it has been read."""
         return self._booking_url or (self._service.url if self._service else None)

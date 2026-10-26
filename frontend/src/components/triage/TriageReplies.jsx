@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api.js'
 import { CATEGORIES, CATEGORY_ORDER, TRIAGE_STATUS, formatNumber, relativeTime, shortDateTime } from '../../labels.js'
-import { BarList, StatTile } from '../Dashboard.jsx'
-import { Badge, Card, ErrorNote, ReplyCheckSchedule, Spinner, useAction, confirmDialog, toast } from '../ui.jsx'
+import { StatTile } from '../Dashboard.jsx'
+import { Badge, ErrorNote, ReplyCheckSchedule, Spinner, useAction, confirmDialog, toast } from '../ui.jsx'
 import { LeadLink } from '../LeadJourney.jsx'
 import { DraftCard } from './Drafts.jsx'
 
@@ -134,115 +134,174 @@ function Times({ reply, onBooked }) {
   )
 }
 
-function ReplyCard({ reply, onChanged, draft, now }) {
-  const [open, setOpen] = useState(null) // 'times' | 'thread' | null
-  const toggle = (what) => setOpen((o) => (o === what ? null : what))
-  const cold = Boolean(reply.lead_id) && reply.event_type === 'reply'
+// Their message without the quoted earlier email ("On Mon ... wrote:" and
+// the "> " lines), which is shown only on request.
+function splitQuoted(text) {
+  const lines = (text || '').split('\n')
+  const at = lines.findIndex((l, i) => /^>/.test(l.trim()) || (/^On .+/.test(l.trim()) && /wrote:\s*$/.test(
+    [l, lines[i + 1] || ''].join(' ').trim())))
+  if (at <= 0) return [text || '', '']
+  return [lines.slice(0, at).join('\n').trim(), lines.slice(at).join('\n').trim()]
+}
 
-  const category = reply.human_category || reply.category
-  const [tone, label] = CATEGORIES[category] || ['neutral', 'Not classified']
+const replyCategory = (r) => r.human_category || r.category
+const needsYou = (r, draft) => ['needs_human', 'failed'].includes(r.triage_status) || draft?.status === 'pending'
+
+// One row of the list: who, what, how urgent.
+function ReplyRow({ reply, draft, active, onSelect }) {
+  const [tone, label] = CATEGORIES[replyCategory(reply)] || ['neutral', 'Not sorted']
+  const urgent = ['needs_human', 'failed'].includes(reply.triage_status)
+  return (
+    <li id={`row-${reply.id}`}>
+      <button className={`inbox-row ${active ? 'is-active' : ''} ${urgent || draft?.status === 'pending' ? 'is-attention' : ''}`}
+        onClick={onSelect} aria-current={active ? 'true' : undefined}>
+        <span className="inbox-avatar" aria-hidden="true">{(reply.from_email || '?')[0].toUpperCase()}</span>
+        <span className="inbox-main">
+          <span className="inbox-line">
+            <span className="inbox-from">{reply.from_email}</span>
+            <span className="inbox-time">{relativeTime(reply.received_at)}</span>
+          </span>
+          <span className="inbox-summary">{reply.summary || reply.snippet || reply.subject || '(empty)'}</span>
+          <span className="inbox-tags">
+            <Badge tone={tone}>{label}</Badge>
+            {urgent && <Badge tone="warning">Needs you</Badge>}
+            {draft?.status === 'pending' && <Badge tone="warning">Answer waiting</Badge>}
+            {draft?.status === 'sent' && <span className="inbox-flag">Answered</span>}
+          </span>
+        </span>
+      </button>
+    </li>
+  )
+}
+
+// "What happened", short: a technical error in brackets folds behind
+// "details" ("booking failed (Graph 500: {...}); a person should book it").
+function WhatHappened({ actions, error }) {
+  if (!actions.length && !error) return null
+  return (
+    <div className="did">
+      <span className="did-title">What happened</span>
+      <ul>
+        {actions.map((a) => {
+          const short = a.replace(/\s*\(.*\)/s, '')
+          return (
+            <li key={a}>
+              {short === a ? a : (
+                <details className="did-details">
+                  <summary>{short} <span className="muted">· details</span></summary>
+                  <code className="did-raw">{a}</code>
+                </details>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {error && <p className="field-error">{error}</p>}
+    </div>
+  )
+}
+
+// The selected reply, in full, with everything you can do about it.
+function ReplyDetail({ reply, draft, onChanged, now }) {
+  const [tab, setTab] = useState('reply') // reply | thread | times
+  const [showQuoted, setShowQuoted] = useState(false)
+  useEffect(() => { setTab('reply'); setShowQuoted(false) }, [reply.id])
+  const cold = Boolean(reply.lead_id) && reply.event_type === 'reply'
+  const category = replyCategory(reply)
+  const [tone, label] = CATEGORIES[category] || ['neutral', 'Not sorted']
   const [sTone, sLabel] = TRIAGE_STATUS[reply.triage_status] || ['neutral', reply.triage_status || '']
-  const actions = reply.extracted?.actions || []
+  const [message, quoted] = splitQuoted(reply.snippet)
   const [{ busy, error }, rerun] = useAction(async (cat) => {
     await api.retriage(reply.id, cat)
     await api.run('triage') // act on it now instead of within the minute
     return true
   })
-
   const change = async (cat) => {
     const what = cat ? `Sort this reply as "${CATEGORIES[cat][1]}" and act on it` : 'Let the AI read this reply again and act on it'
     if (!(await confirmDialog(`${what}?\n\nA new answer may be drafted; it replaces any draft still waiting for this lead. Nothing is sent without the usual delay or your approval.`))) return
-    if ((await rerun(cat)) !== undefined) onChanged()
+    if ((await rerun(cat)) !== undefined) { toast.success('Done. The reply was read again.'); onChanged() }
   }
 
   return (
-    <li className="reply triage-reply">
-      <div className="reply-head">
-        <div className="reply-who">
+    <article className="inbox-detail">
+      <header className="detail-head">
+        <span className="inbox-avatar lg" aria-hidden="true">{(reply.from_email || '?')[0].toUpperCase()}</span>
+        <div className="detail-who">
           <strong><LeadLink leadId={reply.lead_id}>{reply.from_email}</LeadLink></strong>
           <span className="muted">
             {reply.extracted?.source === 'nurture'
-              ? <>Reply to an Email Nurture email · <a href="#nurture/leads">see Email Nurture → Leads</a></>
+              ? <>Reply to an Email Nurture email · <a href="#nurture/leads">Email Nurture → Leads</a></>
               : [reply.job_title, reply.company].filter(Boolean).join(' · ') || 'No job title or company'}
           </span>
         </div>
-        <div className="reply-meta">
+        <div className="detail-meta">
           <span className="badge-row">
             {category && <Badge tone={tone}>{label}</Badge>}
             {reply.triage_status !== 'done' && <Badge tone={sTone}>{sLabel}</Badge>}
           </span>
           <span className="muted">
-            {relativeTime(reply.received_at)}
+            {shortDateTime(reply.received_at)}
             {reply.confidence != null && !reply.human_category && ` · ${pct(reply.confidence)} sure`}
             {reply.human_category && ' · set by you'}
           </span>
         </div>
-      </div>
-      {reply.summary && <p className="reply-summary">{reply.summary}</p>}
-      <p className="reply-subject">{reply.subject || '(no subject)'}</p>
-      {reply.snippet && <p className="reply-snippet">{reply.snippet}</p>}
+      </header>
 
-      {(actions.length > 0 || reply.triage_error) && (
-        <div className="did">
-          <span className="did-title">What happened</span>
-          <ul>
-            {actions.map((a) => (
-              <li key={a}>{a}</li>
-            ))}
-          </ul>
-          {reply.triage_error && <p className="field-error">{reply.triage_error}</p>}
+      <div className="detail-toolbar">
+        <div className="seg" role="tablist" aria-label="Show">
+          <button role="tab" aria-selected={tab === 'reply'} className={tab === 'reply' ? 'is-active' : ''} onClick={() => setTab('reply')}>Reply</button>
+          {reply.lead_id && <button role="tab" aria-selected={tab === 'thread'} className={tab === 'thread' ? 'is-active' : ''} onClick={() => setTab('thread')}>Conversation</button>}
+          {cold && <button role="tab" aria-selected={tab === 'times'} className={tab === 'times' ? 'is-active' : ''} onClick={() => setTab('times')}>Book a time</button>}
         </div>
-      )}
-
-      {draft && <ul className="replies card-answer"><DraftCard draft={draft} now={now} onChanged={onChanged} compact /></ul>}
-
-      {open === 'times' && <Times reply={reply} onBooked={onChanged} />}
-      {open === 'thread' && <Thread leadId={reply.lead_id} />}
-
-      <div className="reply-actions">
-        {cold && (
-          <button className="btn btn-sm" onClick={() => toggle('times')} aria-expanded={open === 'times'}>
-            {open === 'times' ? 'Hide times' : 'Book a time'}
-          </button>
-        )}
-        {reply.lead_id && (
-          <button className="btn btn-ghost btn-sm" onClick={() => toggle('thread')} aria-expanded={open === 'thread'}>
-            {open === 'thread' ? 'Hide conversation' : 'Conversation'}
-          </button>
-        )}
-        <label className="inline-select">
-          <span className="muted">Wrong category?</span>
-          <select
-            value=""
-            disabled={busy || reply.triage_status === 'processing'}
-            onChange={(e) => e.target.value && change(e.target.value)}
-            aria-label="Change category and re-run"
-          >
-            <option value="">{category ? 'Change it…' : 'Set it…'}</option>
+        <div className="detail-tools">
+          <select value="" disabled={busy || reply.triage_status === 'processing'}
+            onChange={(e) => e.target.value && change(e.target.value)} aria-label="Change category and re-run">
+            <option value="">{category ? 'Wrong category?' : 'Set category…'}</option>
             {CATEGORY_ORDER.map((c) => (
-              <option key={c} value={c} disabled={c === category}>
-                {CATEGORIES[c][1]}
-              </option>
+              <option key={c} value={c} disabled={c === category}>{CATEGORIES[c][1]}</option>
             ))}
           </select>
-        </label>
-        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => change(null)}
-          title="The AI reads this reply again from scratch, e.g. after it failed or after you fixed the lead's details">
-          {busy ? <Spinner /> : null} {busy ? 'Reading again…' : 'Read again'}
-        </button>
-        {reply.gmail_link && (
-          <a className="btn btn-sm" href={reply.gmail_link} target="_blank" rel="noreferrer">
-            Open in Gmail ↗
-          </a>
-        )}
+          <button className="btn btn-sm" disabled={busy} onClick={() => change(null)}
+            title="The AI reads this reply again from scratch, e.g. after it failed or after you fixed the lead's details">
+            {busy ? <Spinner /> : null} Read again
+          </button>
+          {reply.gmail_link && (
+            <a className="btn btn-sm" href={reply.gmail_link} target="_blank" rel="noreferrer">Open in Gmail ↗</a>
+          )}
+        </div>
       </div>
       <ErrorNote error={error} />
-    </li>
+
+      {tab === 'reply' && (
+        <div className="detail-body">
+          {reply.summary && <p className="detail-summary">{reply.summary}</p>}
+          <section className="their-message">
+            <span className="did-title">They wrote</span>
+            <p className="reply-subject">{reply.subject || '(no subject)'}</p>
+            <p className="email-body">{message || '(empty)'}</p>
+            {quoted && (
+              <button className="link-btn" onClick={() => setShowQuoted(!showQuoted)}>
+                {showQuoted ? 'Hide earlier email' : '··· Show earlier email'}
+              </button>
+            )}
+            {showQuoted && <p className="email-body quoted">{quoted}</p>}
+          </section>
+          <WhatHappened actions={reply.extracted?.actions || []} error={reply.triage_error} />
+          {draft
+            ? <ul className="replies card-answer"><DraftCard draft={draft} now={now} onChanged={onChanged} compact /></ul>
+            : <p className="muted">No answer for this reply{category === 'not_interested' || category === 'unsubscribe' ? ' (none is needed)' : ''}.</p>}
+        </div>
+      )}
+      {tab === 'thread' && <Thread key={reply.id} leadId={reply.lead_id} />}
+      {tab === 'times' && <Times key={reply.id} reply={reply} onBooked={onChanged} />}
+    </article>
   )
 }
 
 export default function TriageReplies() {
   const [filter, setFilter] = useState('all')
+  const [query, setQuery] = useState('')
+  const [selectedId, setSelectedId] = useState(null)
   const [stats, setStats] = useState(null)
   const [schedule, setSchedule] = useState(null)
   const [replies, setReplies] = useState(null)
@@ -252,14 +311,14 @@ export default function TriageReplies() {
     const id = setInterval(() => setNow(Date.now()), 30_000)
     return () => clearInterval(id)
   }, [])
+  // All recent replies load once; filters and search work on them instantly.
   const [{ busy, error }, load] = useAction(async () => {
-    const cat = CATEGORY_ORDER.includes(filter) ? filter : null
     const [s, r, h, d] = await Promise.all([
-      api.triageStats(), api.triageEvents(cat), api.health(), api.drafts('all', 200).catch(() => ({ drafts: [] })),
+      api.triageStats(), api.triageEvents(null, 200), api.health(), api.drafts('all', 200).catch(() => ({ drafts: [] })),
     ])
     setStats(s)
     setReplies(r.events || [])
-    // Each reply's newest answer, shown and handled right on its card.
+    // Each reply's newest answer.
     const byEvent = {}
     for (const x of d.drafts || []) {
       if (!byEvent[x.event_id] || x.created_at > byEvent[x.event_id].created_at) byEvent[x.event_id] = x
@@ -280,24 +339,46 @@ export default function TriageReplies() {
     const id = setInterval(load, 30_000)
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter])
+  }, [])
+
+  const all = replies || []
+  const counts = { all: all.length, needs_human: all.filter((r) => needsYou(r, drafts[r.id])).length }
+  for (const c of CATEGORY_ORDER) counts[c] = all.filter((r) => replyCategory(r) === c).length
+  const q = query.trim().toLowerCase()
+  const shown = all.filter((r) => {
+    if (filter === 'needs_human' && !needsYou(r, drafts[r.id])) return false
+    if (CATEGORY_ORDER.includes(filter) && replyCategory(r) !== filter) return false
+    if (!q) return true
+    return [r.from_email, r.company, r.job_title, r.subject, r.summary, r.snippet]
+      .some((v) => (v || '').toLowerCase().includes(q))
+  })
+  const selected = shown.find((r) => r.id === selectedId) || shown[0] || null
+
+  // ↑/↓ (or j/k) move through the list, unless you are typing.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey) return
+      const step = { ArrowDown: 1, j: 1, ArrowUp: -1, k: -1 }[e.key]
+      if (!step || !shown.length) return
+      e.preventDefault()
+      const i = Math.max(0, shown.findIndex((r) => r.id === selected?.id))
+      const next = shown[Math.min(shown.length - 1, Math.max(0, i + step))]
+      setSelectedId(next.id)
+      document.getElementById(`row-${next.id}`)?.scrollIntoView({ block: 'nearest' })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [shown, selected])
 
   const missing = error?.message?.includes('not found') && error.message.includes('triage')
-  const shown = (replies || []).filter((r) => filter !== 'needs_human' || ['needs_human', 'failed'].includes(r.triage_status))
-  const cats = stats?.categories || {}
-  const total = Object.values(cats).reduce((a, b) => a + b, 0)
   const waiting = (stats?.drafts?.pending || 0) + (stats?.drafts?.approved || 0)
-  const needsYou = (stats?.triage?.needs_human || 0) + (stats?.triage?.failed || 0)
 
   return (
     <div className="stack">
       <div className="toolbar">
         <div>
           <h1>Replies</h1>
-          <p className="muted">
-            Every reply is read and sorted automatically. Interested leads get meeting times, "not now"
-            comes back in 60 days, referrals are enrolled, and unsubscribes are blocked everywhere.
-          </p>
+          <p className="muted">Every reply is read and sorted automatically. Pick one to see it, its answer and what you can do.</p>
         </div>
         <div className="toolbar-actions">
           <ReplyCheckSchedule schedule={schedule} />
@@ -311,9 +392,7 @@ export default function TriageReplies() {
       {missing ? (
         <div className="note note-warning">
           <Badge tone="warning">Setup</Badge>
-          <span>
-            Run <code>supabase/migrations/0006_triage.sql</code> in the Supabase SQL Editor to turn on reply triage.
-          </span>
+          <span>Run <code>supabase/migrations/0006_triage.sql</code> in the Supabase SQL Editor to turn on reply triage.</span>
         </div>
       ) : (
         <ErrorNote error={error?.status === 0 ? null : error} onRetry={load} />
@@ -322,45 +401,50 @@ export default function TriageReplies() {
       {runResult && <CheckResult {...runResult} />}
 
       <div className="stats">
-        <StatTile
-          label="Reply → meeting rate"
-          value={stats ? pct(stats.reply_to_meeting_rate) : null}
-          note={stats && `${formatNumber(stats.meeting_leads)} of ${formatNumber(stats.replied_leads)} who replied`}
-        />
+        <StatTile label="Reply → meeting" value={stats ? pct(stats.reply_to_meeting_rate) : null}
+          note={stats && `${formatNumber(stats.meeting_leads)} of ${formatNumber(stats.replied_leads)} who replied`} />
         <StatTile label="Meetings coming up" value={stats?.meetings_upcoming} />
-        <StatTile label="Drafts waiting" value={stats ? waiting : null} note={stats && 'approve, edit or let them auto-send'} />
-        <StatTile label="Need you" value={stats ? needsYou : null} note={stats && 'unclear or failed replies'} />
+        <StatTile label="Answers waiting" value={stats ? waiting : null} note={stats && 'approve, edit or let them auto-send'} />
+        <StatTile label="Need you" value={replies ? counts.needs_human : null} note="unclear, failed or waiting for you" />
         <StatTile label="Coming back later" value={stats?.snoozed} note={stats && '"not now" leads'} />
       </div>
 
-      {total > 0 && (
-        <Card title="Replies by category" subtitle={`${formatNumber(total)} triaged replies`}>
-          <BarList rows={CATEGORY_ORDER.map((c) => [c, CATEGORIES[c][1]])} counts={cats} total={total} />
-        </Card>
-      )}
-
-      <div className="chips" role="tablist" aria-label="Filter replies">
-        {FILTERS.map(([id, label]) => (
-          <button key={id} role="tab" aria-selected={filter === id}
-            className={`chip ${filter === id ? 'is-active' : ''}`} onClick={() => setFilter(id)}>
-            {label}
-          </button>
-        ))}
-        {busy && <Spinner />}
-      </div>
-
       {replies && !missing && (
-        <Card>
-          {shown.length ? (
-            <ul className="replies">
-              {shown.map((r) => (
-                <ReplyCard key={r.id} reply={r} onChanged={refresh} draft={drafts[r.id]} now={now} />
+        <div className="inbox">
+          <aside className="inbox-list" aria-label="Replies">
+            <div className="inbox-search">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4" /></svg>
+              <input type="search" value={query} onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search email, company, words…" aria-label="Search replies" />
+              {busy && <Spinner />}
+            </div>
+            <div className="chips inbox-chips" role="tablist" aria-label="Filter replies">
+              {FILTERS.filter(([id]) => id === 'all' || id === 'needs_human' || counts[id]).map(([id, label]) => (
+                <button key={id} role="tab" aria-selected={filter === id}
+                  className={`chip chip-sm ${filter === id ? 'is-active' : ''}`} onClick={() => setFilter(id)}>
+                  {label} <span className="chip-count">{formatNumber(counts[id] || 0)}</span>
+                </button>
               ))}
-            </ul>
-          ) : (
-            <p className="muted">Nothing here. Replies appear within minutes of arriving.</p>
-          )}
-        </Card>
+            </div>
+            {shown.length ? (
+              <ul className="inbox-rows">
+                {shown.map((r) => (
+                  <ReplyRow key={r.id} reply={r} draft={drafts[r.id]} active={selected?.id === r.id} onSelect={() => setSelectedId(r.id)} />
+                ))}
+              </ul>
+            ) : (
+              <p className="muted inbox-empty">
+                {q ? `No reply matches "${query}".` : 'Nothing here. Replies appear within minutes of arriving.'}
+              </p>
+            )}
+            <p className="muted inbox-foot">{formatNumber(shown.length)} of {formatNumber(all.length)} recent replies · ↑ ↓ to move</p>
+          </aside>
+          <section className="inbox-pane" aria-label="Selected reply">
+            {selected
+              ? <ReplyDetail reply={selected} draft={drafts[selected.id]} onChanged={refresh} now={now} />
+              : <p className="muted inbox-empty">Select a reply.</p>}
+          </section>
+        </div>
       )}
     </div>
   )

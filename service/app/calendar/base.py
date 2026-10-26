@@ -92,6 +92,16 @@ class CalendarProvider(abc.ABC):
         Raises ``CalendarError(slot_taken=True)`` if it is no longer free.
         """
 
+    async def reschedule(self, external_id: str, new_start: datetime, attendee: Attendee,
+                         notes: str = "") -> Booking:
+        """Move the booking ``external_id`` to the slot starting at ``new_start``.
+
+        The returned Booking may carry a new external_id (a provider that
+        cancels and rebooks). Raises ``CalendarError(slot_taken=True)`` if the
+        new time is not free; the old booking then stays as it was.
+        """
+        raise CalendarError(f"{self.name} cannot move bookings; a person should reschedule it")
+
     def booking_link(self) -> Optional[str]:
         """A page where the lead can pick a time themselves, if there is one."""
         return None

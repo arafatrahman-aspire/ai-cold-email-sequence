@@ -174,6 +174,32 @@ class CalComProvider(CalendarProvider):
             meeting_url=_url(data),
         )
 
+    async def reschedule(self, external_id: str, new_start: datetime, attendee: Attendee,
+                         notes: str = "") -> Booking:
+        """POST /v2/bookings/{uid}/reschedule. Cal.com makes a new booking (new
+        uid), cancels the old one and tells the attendee itself."""
+        body: dict[str, Any] = {"start": _utc(new_start)}
+        if notes:
+            body["reschedulingReason"] = notes[:300]
+        try:
+            resp = await self._client.post(
+                f"/v2/bookings/{external_id}/reschedule", json=body,
+                headers={"cal-api-version": self._bookings_version},
+            )
+        except httpx.HTTPError as exc:
+            raise CalendarError(f"Cal.com unreachable: {exc}") from exc
+        if resp.status_code >= 400:
+            raise self._error(resp, "reschedule")
+        data = resp.json().get("data") or {}
+        if isinstance(data, list):
+            data = data[0] if data else {}
+        uid = data.get("uid") or data.get("id")
+        if not uid:
+            raise CalendarError("Cal.com reschedule response had no uid")
+        start = _parse(data["start"]) if data.get("start") else new_start
+        return Booking(provider=self.name, external_id=str(uid), start=start,
+                       end=_parse(data["end"]) if data.get("end") else start, meeting_url=_url(data))
+
     async def list_bookings(self, starting_after: datetime) -> list[RemoteBooking]:
         out: list[RemoteBooking] = []
         params: dict[str, Any] = {"afterStart": _utc(starting_after), "sortStart": "asc", "limit": 100}

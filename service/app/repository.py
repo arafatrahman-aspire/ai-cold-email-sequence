@@ -640,6 +640,16 @@ async def meetings_overview(limit: int = 100) -> list[dict[str, Any]]:
     return await db.rows("meetings_overview", p_limit=limit)
 
 
+async def upcoming_meeting(lead_id: str, now: datetime) -> Optional[dict[str, Any]]:
+    """The lead's next booked meeting (the one a reschedule moves), or None."""
+    def start(m: dict[str, Any]) -> datetime:
+        v = m.get("start_at")
+        return v if isinstance(v, datetime) else datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    rows = [m for m in await meetings_overview(500)
+            if str(m.get("lead_id")) == lead_id and m.get("status") == "booked" and start(m) > now]
+    return min(rows, key=start) if rows else None
+
+
 async def open_offers(limit: int = 50) -> list[dict[str, Any]]:
     return await db.rows("open_offers", p_limit=limit)
 
@@ -650,3 +660,39 @@ async def list_snoozed(limit: int = 100) -> list[dict[str, Any]]:
 
 async def triage_stats() -> dict[str, Any]:
     return await db.rpc("triage_stats") or {}
+
+
+# --- meeting reminders and Brevo engagement (0019) ------------------------------
+
+async def meetings_due_reminder(until: datetime) -> list[dict[str, Any]]:
+    """Booked meetings starting before ``until`` that have had no reminder.
+    Empty until 0019_reminders_and_engagement.sql is run."""
+    try:
+        return await db.rows("meetings_due_reminder", p_until=until)
+    except db.DatabaseError as exc:
+        if _not_installed(exc):
+            return []
+        raise
+
+
+async def mark_meeting_reminded(meeting_id: str, sent: bool) -> bool:
+    """Claim (sent=True) or release (False) a meeting's reminder."""
+    return bool(await db.rpc("mark_meeting_reminded", p_id=meeting_id, p_sent=sent))
+
+
+async def record_email_event(message_id: str, email: str | None, event: str, link: str | None,
+                             reason: str | None, at: datetime) -> dict[str, Any]:
+    """Store what Brevo reported about one of our emails: {outcome: new |
+    seen | unknown, lead_id, source}."""
+    return await db.rpc("record_email_event", p_message_id=message_id, p_email=email or "",
+                        p_event=event, p_link=link or "", p_reason=reason or "", p_at=at) or {}
+
+
+async def lead_engagement(lead_id: str, limit: int = 200) -> list[dict[str, Any]]:
+    """One lead's email events, newest first. Empty before 0019 is run."""
+    try:
+        return await db.rows("lead_engagement", p_lead_id=lead_id, p_limit=limit)
+    except db.DatabaseError as exc:
+        if _not_installed(exc):
+            return []
+        raise

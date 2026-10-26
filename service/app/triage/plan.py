@@ -6,6 +6,7 @@ The worker carries the plan out. Actions:
   snooze                               stop now, start a fresh sequence in N days
   add_referral                         enroll the person they pointed to
   book_offered / book_proposed         book a slot (falls back to offering new ones)
+  reschedule                           move the lead's booked meeting to the time they chose
   offer_slots                          find free slots to put in the reply
 
 Below the confidence threshold nothing irreversible happens: no booking, no
@@ -76,15 +77,19 @@ def decide(
         return Plan(category, draft_kind="objection_reply", needs_human=not confident)
 
     # interested
-    if has_meeting and "proposed_time" not in extracted:
-        return Plan(category, note="A meeting is already booked; nothing to send.")
+    chosen = extracted.get("chosen_slot")
+    picked = isinstance(chosen, int) and 1 <= chosen <= offered_count
     if has_meeting:
-        return Plan(category, needs_human=True, note="Wants to move an existing meeting; please reschedule.")
+        # A new time from someone already booked: move the meeting.
+        if not (picked or extracted.get("proposed_time")):
+            return Plan(category, note="A meeting is already booked; nothing to send.")
+        if not confident:
+            return Plan(category, needs_human=True, note="Seems to want to move their meeting; please check.")
+        return Plan(category, ["reschedule"], "booking_confirmation", note="Meeting moved to their new time.")
     if not confident:
         return Plan(category, ["offer_slots"], "meeting_offer", needs_human=True,
                     note="Looks interested; check the draft before it goes.")
-    chosen = extracted.get("chosen_slot")
-    if isinstance(chosen, int) and 1 <= chosen <= offered_count:
+    if picked:
         return Plan(category, ["book_offered"], "booking_confirmation")
     if extracted.get("proposed_time"):
         return Plan(category, ["book_proposed"], "booking_confirmation")

@@ -84,6 +84,10 @@ def set_guidance(event_id: str, text: str) -> None:
     _guidance[event_id] = text
 
 
+def _as_dt(value) -> datetime:
+    return value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
 async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
                         now: Optional[datetime] = None) -> str:
     """Triage one reply and act on it. Returns the outcome for the tick stats."""
@@ -195,6 +199,67 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
         done.append(f"booked {booked}")
         return True
 
+    async def reschedule() -> None:
+        """Move their booked meeting to the time they now chose, when it is free.
+        Otherwise the meeting stays and the nearest free times are offered."""
+        nonlocal draft_kind, needs_human, booked, meeting_url
+        current = await repo.upcoming_meeting(lead_id, now)
+        if calendar is None or current is None or current.get("provider") != calendar.name:
+            draft_kind, needs_human = None, True
+            done.append("wants to move their meeting; a person should reschedule it"
+                        + ("" if current else " (no upcoming meeting found)"))
+            return
+        chosen = extracted.get("chosen_slot")
+        if isinstance(chosen, int) and 1 <= chosen <= len(offered):
+            slot = offered[chosen - 1]
+        else:
+            when = datetime.fromisoformat(extracted["proposed_time"])
+            try:
+                free = await calendar.free_slots(when - timedelta(minutes=1), when + timedelta(minutes=1))
+            except CalendarError as exc:
+                draft_kind, needs_human = None, True
+                done.append(f"calendar unavailable ({exc}); a person should reschedule")
+                return
+            slot = find_slot(free, when)
+            if slot is None:
+                draft_kind = "slot_unavailable"
+                done.append("their new time was not free; the meeting stays as booked")
+                await offer_slots(around=when)
+                return
+        old_start = _as_dt(current["start_at"])
+        old_end = _as_dt(current["end_at"]) if current.get("end_at") else old_start + (slot.end - slot.start)
+        if abs((slot.start - old_start).total_seconds()) < 60:
+            draft_kind = None
+            done.append("they confirmed the time already booked")
+            return
+        try:
+            b = await calendar.reschedule(current["external_id"], slot.start, _attendee(lead, reply_to),
+                                          f"Moved at their request: {result.summary}")
+        except CalendarError as exc:
+            if exc.slot_taken:
+                draft_kind = "slot_unavailable"
+                done.append("their new time was just taken; the meeting stays as booked")
+                await offer_slots(around=slot.start)
+            else:
+                draft_kind, needs_human = None, True
+                done.append(f"reschedule failed ({exc}); a person should move it")
+            return
+        if b.external_id != current["external_id"]:
+            # Rebooked under a new id (Cal.com): record it, then retire the old one.
+            await repo.record_meeting(lead_id, event_id, b.provider, b.external_id, b.start, b.end,
+                                      reply_to, b.meeting_url)
+            await repo.sync_meeting(b.provider, current["external_id"], old_start, old_end, "cancelled",
+                                    current.get("attendee_email"), current.get("attendee_name"), None, True)
+        else:
+            await repo.sync_meeting(b.provider, b.external_id, b.start, b.end, "booked",
+                                    current.get("attendee_email") or reply_to, current.get("attendee_name"),
+                                    b.meeting_url, True)
+        await repo.cancel_lead_drafts(lead_id, "meeting rescheduled")
+        was = describe_slot(Slot(old_start, old_end), tz)
+        booked = f"{describe_slot(Slot(b.start, b.end), tz)} (moved from {was})"
+        meeting_url = b.meeting_url or current.get("meeting_url")
+        done.append(f"rescheduled to {describe_slot(Slot(b.start, b.end), tz)} (was {was})")
+
     try:
         for action in plan.actions:
             if action == "suppress":
@@ -267,6 +332,8 @@ async def process_event(event: dict, cfg: dict, inboxes: dict[str, Inbox],
                     draft_kind = "slot_unavailable"
                     done.append("slot was taken")
                     await offer_slots()
+            elif action == "reschedule":
+                await reschedule()
             elif action == "offer_slots":
                 await offer_slots()
                 if new_offer:

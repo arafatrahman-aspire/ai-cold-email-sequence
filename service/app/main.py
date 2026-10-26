@@ -31,7 +31,7 @@ from app.mail.factory import close_transports, get_sender
 from app.calendar.base import CalendarError
 from app.calendar.factory import close_calendar, get_calendar
 from app.nurture import api as nurture_api
-from app.workers import alerts, calendar_sync, intake, poller, scheduler, sender
+from app.workers import alerts, calendar_sync, engagement, intake, poller, reminders, scheduler, sender
 from app.workers import triage as triage_worker
 
 logging.basicConfig(
@@ -651,6 +651,8 @@ async def lead_journey(lead_id: UUID) -> dict:
     if not journey.get("lead") and not journey.get("items"):
         raise HTTPException(status_code=404, detail="no such lead")
     journey["campaign"] = await repo.campaign_for_lead(str(lead_id))
+    # What Brevo saw: delivered, opened, clicked, bounced (newest first).
+    journey["engagement"] = await repo.lead_engagement(str(lead_id))
     return journey
 
 
@@ -977,6 +979,18 @@ async def triage_snoozed(limit: int = 100) -> dict:
 @app.post("/run/triage", dependencies=[Depends(require_user)])
 async def run_triage() -> dict:
     return {"result": await triage_worker.run_once()}
+
+
+@app.post("/run/reminders", dependencies=[Depends(require_user)])
+async def run_reminders() -> dict:
+    """Send due day-before meeting reminders now (normally every 15 minutes)."""
+    return {"result": await reminders.run_once()}
+
+
+@app.post("/run/engagement", dependencies=[Depends(require_user)])
+async def run_engagement() -> dict:
+    """Read Brevo's email events now (normally every 10 minutes)."""
+    return {"result": await engagement.run_once()}
 
 
 @app.post("/run/calendar-sync", dependencies=[Depends(require_user)])

@@ -141,6 +141,10 @@ class Settings(BaseSettings):
     poll_interval_seconds: int = 600  # reply check: every 10 minutes
     triage_interval_seconds: int = 60
     calendar_sync_interval_seconds: int = 300  # pick up meetings booked through the link
+    # Day-before meeting reminders (the window is a Reply triage setting).
+    reminder_interval_seconds: int = 900
+    # Brevo engagement sync: opens, clicks, bounces, complaints (MAIL_SENDER=brevo).
+    engagement_interval_seconds: int = 600
 
     # --- Email Nurture ------------------------------------------------------
     # Nurture sends from its own account, never from the cold inboxes, so

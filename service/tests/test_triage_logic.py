@@ -110,6 +110,16 @@ def test_interested_paths():
     assert plan("interested", has_meeting=True).draft_kind is None
 
 
+def test_a_booked_lead_with_a_new_time_is_rescheduled():
+    moved = plan("interested", extracted={"proposed_time": "2026-10-08T15:00:00+00:00"}, has_meeting=True)
+    assert (moved.actions, moved.draft_kind, moved.needs_human) == (["reschedule"], "booking_confirmation", False)
+    picked = plan("interested", extracted={"chosen_slot": 1}, offered_count=2, has_meeting=True)
+    assert picked.actions == ["reschedule"]
+    # Never move a meeting on a low-confidence read.
+    unsure = plan("interested", 0.5, extracted={"proposed_time": "2026-10-08T15:00:00+00:00"}, has_meeting=True)
+    assert (unsure.actions, unsure.needs_human) == ([], True)
+
+
 def test_other_and_objection():
     assert plan("other").needs_human
     assert plan("objection").draft_kind == "objection_reply"

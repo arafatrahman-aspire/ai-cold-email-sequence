@@ -499,3 +499,48 @@ async def test_msbookings_reads_appointments_made_in_the_bookings_app():
     [b] = await cal.list_bookings(MON)
     assert (b.external_id, b.attendee_email, b.ours) == ("manual-1", "lea@x.com", True)
     assert b.start == datetime(2026, 10, 7, 10, 30, tzinfo=timezone.utc) and b.end - b.start == timedelta(minutes=30)
+
+
+@pytest.mark.anyio
+async def test_calcom_reschedule_uses_its_endpoint_and_returns_the_new_uid():
+    sent = {}
+
+    def handler(request):
+        sent["path"], sent["body"] = request.url.path, json.loads(request.content)
+        sent["version"] = request.headers.get("cal-api-version")
+        return httpx.Response(201, json={"status": "success", "data": {
+            "uid": "bk-new", "start": "2026-10-07T14:00:00.000Z", "end": "2026-10-07T14:30:00.000Z",
+            "location": "https://cal.video/new"}})
+
+    cal = CalComProvider(api_key="k", event_type=42, transport=httpx.MockTransport(handler))
+    b = await cal.reschedule("bk-old", datetime(2026, 10, 7, 14, tzinfo=timezone.utc), DANA, "their request")
+    assert sent["path"] == "/v2/bookings/bk-old/reschedule" and sent["body"]["start"] == "2026-10-07T14:00:00Z"
+    assert sent["body"]["reschedulingReason"] == "their request" and sent["version"]
+    assert (b.external_id, b.meeting_url) == ("bk-new", "https://cal.video/new")
+
+
+@pytest.mark.anyio
+async def test_msbookings_reschedule_moves_the_same_appointment():
+    server = FakeGraph(staff=("s1", "s2"))
+    cal, _ = msbookings(server)
+    first = await cal.book(MON + timedelta(hours=10), DANA)
+    patched = []
+    real = server.__call__
+
+    def spy(request):
+        if request.method == "PATCH":
+            body = json.loads(request.content)
+            patched.append(body)
+            appt = server.appointments[0]
+            appt.update(body)
+            return httpx.Response(204)
+        if request.method == "GET" and request.url.path.endswith(f"/appointments/{first.external_id}"):
+            return httpx.Response(200, json=server.appointments[0])
+        return real(request)
+
+    cal2 = MSBookingsProvider("t", "c", "s", BIZ, SERVICE, transport=httpx.MockTransport(spy))
+    moved = await cal2.reschedule(first.external_id, MON + timedelta(hours=14), DANA)
+    assert moved.external_id == first.external_id and moved.meeting_url == first.meeting_url
+    [body] = patched
+    assert body["startDateTime"]["dateTime"] == "2026-10-05T14:00:00" and body["staffMemberIds"] == ["s1"]
+    assert len(server.appointments) == 1

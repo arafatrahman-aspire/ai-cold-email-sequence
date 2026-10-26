@@ -63,6 +63,20 @@ class FakeCalendar(CalendarProvider):
         self.attendees[booking.external_id] = attendee
         return booking
 
+    async def reschedule(self, external_id: str, new_start: datetime, attendee: Attendee,
+                         notes: str = "") -> Booking:
+        old = next((s for s, b in self.bookings.items() if b.external_id == external_id), None)
+        if old is None:
+            raise CalendarError(f"no booking {external_id}")
+        valid = {s.start for s in self._all_slots(new_start - timedelta(minutes=1), new_start + timedelta(minutes=1))}
+        if new_start not in valid or new_start in self.bookings:
+            raise CalendarError(f"{new_start.isoformat()} is not free", slot_taken=True)
+        moved = Booking(provider=self.name, external_id=external_id, start=new_start,
+                        end=new_start + timedelta(minutes=SLOT_MINUTES), meeting_url=self.bookings[old].meeting_url)
+        del self.bookings[old]
+        self.bookings[new_start] = moved
+        return moved
+
     async def list_bookings(self, starting_after: datetime) -> list[RemoteBooking]:
         out = []
         for start, b in sorted(self.bookings.items()):
