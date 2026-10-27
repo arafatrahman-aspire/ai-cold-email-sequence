@@ -46,7 +46,7 @@ async def sending_inbox() -> Optional[Inbox]:
     set (a cold inbox's address means that inbox, with its credentials),
     otherwise the first active cold inbox."""
     own = mailbox()
-    cold = await repo.active_inboxes()
+    cold = await repo.cached_inboxes()
     if own is not None:
         return next((i for i in cold if i.email.lower() == own.email), own)
     return cold[0] if cold else None
@@ -73,7 +73,7 @@ async def reply_to() -> Optional[str]:
     s = get_settings()
     if s.nurture_reply_to.strip():
         return s.nurture_reply_to.strip()
-    inboxes = await repo.active_inboxes()
+    inboxes = await repo.cached_inboxes()
     return inboxes[0].email if inboxes else None
 
 

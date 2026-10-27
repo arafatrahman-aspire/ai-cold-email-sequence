@@ -359,7 +359,7 @@ The first time an inbox is polled, the mail already in it is skipped.
 |---|---|
 | `INBOX_<REF>_SMTP_PASSWORD` | One per inbox (see B5.3); optional `_IMAP_PASSWORD` |
 | `UNSUBSCRIBE_MAILTO`, `REPLY_TO` | Optional sending identity overrides |
-| `INTAKE/SEND/POLL_INTERVAL_SECONDS` | Worker timing (300 / 180 / 600); the reply check also runs once at startup |
+| `INTAKE/SEND/POLL_INTERVAL_SECONDS` | Worker timing (1800 / 1800 / 600); the reply check also runs once at startup |
 
 ### B5.2 Runtime settings (`cold_email.settings`)
 
@@ -462,7 +462,7 @@ Draft status: `pending` → `approved` → `sending` → `sent`, or `rejected` /
 
 ## C3. How a reply is handled
 
-The triage worker runs every minute. Each run:
+The triage worker runs right after a poll that brought in mail, and otherwise every 30 minutes. Each run:
 
 1. **Wakes snoozed leads** whose "not now" period is over: they get a fresh sequence.
 2. **Triages new replies**: reads the conversation → classifies → plans → acts → drafts.
@@ -508,7 +508,7 @@ arrived at, in the same thread.
 
 ### C3.5 Meetings booked through the link
 
-Every 5 minutes the calendar sync reads the calendar's bookings. A booking by one
+Every hour the calendar sync reads the calendar's bookings. A booking by one
 of your leads (or anyone, for the Cal.com event type or Bookings service) appears on
 the Meetings page, stops that lead's sequence and cancels unsent replies. A
 cancellation puts the lead back to "replied".
@@ -543,8 +543,8 @@ through the classifier (target 95%). From the command line:
 | `MSBOOKINGS_STAFF_IDS` | Optional round-robin order; empty = the service's staff |
 | `MSBOOKINGS_BOOKING_URL` | Optional link for emails; empty = the service's Bookings page |
 | `MSBOOKINGS_TIMEZONE` | The booking page's IANA timezone |
-| `TRIAGE_INTERVAL_SECONDS` | Triage worker (60) |
-| `CALENDAR_SYNC_INTERVAL_SECONDS` | Calendar sync (300) |
+| `TRIAGE_INTERVAL_SECONDS` | Triage worker (1800; also runs right after a poll that found mail) |
+| `CALENDAR_SYNC_INTERVAL_SECONDS` | Calendar sync (3600) |
 
 ### Runtime setting `triage` (Reply triage → Settings)
 
@@ -636,7 +636,7 @@ Email status: `writing` → `needs_approval` (pilot mode) → `ready` → `sendi
 ### D3.1 Who joins
 
 A lead whose score (`public.lead_scores.tier`, else `leads.lead_score`)
-**changes** to Warm or Cold, checked every 5 minutes with an hourly
+**changes** to Warm or Cold, checked every 15 minutes with an hourly
 reconciliation (there are no triggers on the shared tables). Leads already Warm
 or Cold when nurture is switched on join only through **Enroll eligible leads**.
 
@@ -733,7 +733,7 @@ are taken and no reply drafts are written):
 | `NURTURE_REPLY_TO` | An inbox Reply Triage reads (empty = first active cold inbox) |
 | `NURTURE_PUBLIC_URL` | Base for tracked links and the unsubscribe page (empty = `APP_PUBLIC_URL` + `/api`). Use an HTTPS subdomain for real leads |
 | `NURTURE_WORKERS` | `false` = no nurture jobs (the tab still works) |
-| `NURTURE_ENROLL/GENERATE/SEND/POLL/RECONCILE_INTERVAL_SECONDS` | 300 / 60 / 60 / 600 / 3600 |
+| `NURTURE_ENROLL/GENERATE/SEND/POLL/RECONCILE_INTERVAL_SECONDS` | 900 / 900 / 900 / 900 / 3600 |
 
 ### Runtime setting `nurture` (Email Nurture → Settings)
 

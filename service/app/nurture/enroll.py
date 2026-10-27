@@ -109,7 +109,7 @@ async def score_tick(now: Optional[datetime] = None) -> dict[str, int]:
     """Every few minutes: live enrollments, then leads rescored since last time."""
     now = now or datetime.now(timezone.utc)
     checked_at = datetime.now(timezone.utc)
-    cfg = await options.load(fresh=True)
+    cfg = await options.load()
     seen = await settings_store.get(SEEN_KEY)
     await settings_store.set_value(SEEN_KEY, checked_at.isoformat(), "When Email Nurture last checked lead scores.")
     if not seen:
@@ -126,7 +126,7 @@ async def score_tick(now: Optional[datetime] = None) -> dict[str, int]:
 async def reconcile_tick(now: Optional[datetime] = None, lookback_hours: int = 48) -> dict[str, int]:
     """Hourly: the same checks, looking back 48 hours."""
     now = now or datetime.now(timezone.utc)
-    cfg = await options.load(fresh=True)
+    cfg = await options.load()
     stats = await check_live(cfg, now)
     await _enroll_changes(datetime.now(timezone.utc) - timedelta(hours=lookback_hours), cfg, now, "reconcile", stats)
     stats = {k: v for k, v in stats.items() if k in REPORTED}

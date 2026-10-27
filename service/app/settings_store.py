@@ -1,8 +1,8 @@
 """Reads operator-tunable settings out of the ``cold_email.settings`` table.
 
-Values are cached briefly so a tight worker loop does not hit the database on
-every iteration, while an operator's change still takes effect within a minute
-without a redeploy.
+Values are cached for half an hour so worker ticks do not hit the database
+every time. A change saved through the console (set_value) refreshes the cache
+at once; one made directly in the database takes effect within 30 minutes.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from app import regions, repository as repo
 
 log = logging.getLogger(__name__)
 
-_CACHE_TTL_SECONDS = 60.0
+_CACHE_TTL_SECONDS = 1800.0
 _cache: dict[str, Any] = {}
 _cache_loaded_at: float = 0.0
 
@@ -75,6 +75,8 @@ DEFAULTS: dict[str, Any] = {
     "nurture_resources": [],
     # When lead scores were last checked (None until the first check).
     "nurture_scores_seen_at": None,
+    # When the Brevo engagement sync last ran (None until the first run).
+    "engagement_seen_at": None,
 }
 
 
@@ -90,9 +92,9 @@ async def refresh() -> None:
         rows = await repo.get_settings()
     except Exception as exc:
         log.warning("could not refresh cold_email.settings (%s); using cached/default values", exc)
-        # Push the next attempt out a little so a hard outage does not turn
-        # every settings read into a failed query.
-        _cache_loaded_at = time.monotonic() - _CACHE_TTL_SECONDS + 10.0
+        # Retry in a minute so a hard outage does not turn every settings
+        # read into a failed query.
+        _cache_loaded_at = time.monotonic() - _CACHE_TTL_SECONDS + 60.0
         return
     _cache = {r["key"]: r["value"] for r in rows}
     _cache_loaded_at = time.monotonic()
@@ -110,7 +112,7 @@ async def get(key: str) -> Any:
 
 async def set_value(key: str, value: Any, description: str | None = None) -> None:
     await repo.set_setting(key, value, description)
-    await refresh()
+    _cache[key] = value
 
 
 @dataclass(frozen=True)

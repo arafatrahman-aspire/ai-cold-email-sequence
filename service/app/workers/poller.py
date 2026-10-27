@@ -186,7 +186,7 @@ async def poll_inbox(inbox: Inbox) -> tuple[dict[str, int], str | None]:
 async def run_once() -> dict[str, Any]:
     """Poll every inbox. Returns outcome counts, plus ``errors`` (the reason
     for each inbox that could not be polled) when there were any."""
-    inboxes = await repo.active_inboxes()
+    inboxes = await repo.cached_inboxes()
     totals: dict[str, Any] = {}
     errors: list[str] = []
     for inbox in inboxes:

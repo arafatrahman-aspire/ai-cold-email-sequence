@@ -14,6 +14,7 @@ of ``cold_email.enrollments``.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date, datetime
 from typing import Any, Optional
 
@@ -308,8 +309,18 @@ async def is_suppressed(email: str) -> bool:
     return bool(await db.rpc("is_suppressed", p_email=email))
 
 
+# Inboxes change rarely (they are edited in the database, not the console), so
+# every worker shares a copy refreshed once an hour (or on restart). The
+# poller's cursor writes are applied to the copy too, so it stays current.
+_INBOX_CACHE_TTL_SECONDS = 3600.0
+_inbox_cache: list[Inbox] | None = None
+_inbox_cache_loaded_at: float = 0.0
+
+
 async def active_inboxes() -> list[Inbox]:
-    return [
+    """The active inboxes, read from the database (current poll cursors)."""
+    global _inbox_cache, _inbox_cache_loaded_at
+    inboxes = [
         Inbox(
             id=str(r["id"]),
             email=r["email"],
@@ -322,6 +333,15 @@ async def active_inboxes() -> list[Inbox]:
         )
         for r in await db.rows("active_inboxes")
     ]
+    _inbox_cache, _inbox_cache_loaded_at = inboxes, time.monotonic()
+    return inboxes
+
+
+async def cached_inboxes() -> list[Inbox]:
+    """The active inboxes, at most an hour old (poll cursors kept current)."""
+    if _inbox_cache is not None and time.monotonic() - _inbox_cache_loaded_at < _INBOX_CACHE_TTL_SECONDS:
+        return _inbox_cache
+    return await active_inboxes()
 
 
 async def reserve_inbox_slot(email_id: str, inbox_id: str, day: date, cap: int) -> bool:
@@ -378,6 +398,10 @@ async def reclaim_stuck_steps(stale_minutes: int = 30) -> int:
 
 async def update_inbox_cursor(inbox_id: str, cursor: int) -> None:
     await db.rpc("update_inbox_cursor", p_inbox_id=inbox_id, p_cursor=cursor)
+    # The database never rewinds a cursor; neither does the cached copy.
+    for inbox in _inbox_cache or []:
+        if inbox.id == inbox_id:
+            inbox.poll_cursor = max(inbox.poll_cursor, cursor)
 
 
 async def match_lead_by_message_ids(message_ids: list[str]) -> Optional[str]:

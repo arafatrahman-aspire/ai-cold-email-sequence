@@ -80,8 +80,8 @@ def merge(stored: Any) -> dict[str, Any]:
 
 
 async def load(fresh: bool = False) -> dict[str, Any]:
-    """The merged settings. ``fresh`` skips the one-minute cache (the
-    pause switch must take effect within one scheduler cycle)."""
+    """The merged settings. ``fresh`` skips the half-hour cache (a change
+    saved through the console refreshes it anyway)."""
     if fresh:
         await settings_store.refresh()
     return merge(await settings_store.get("nurture"))

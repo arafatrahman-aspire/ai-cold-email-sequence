@@ -462,7 +462,7 @@ async def run_once() -> dict[str, Any]:
         stats["disabled"] = 1
         return stats
 
-    inboxes = {i.id: i for i in await repo.active_inboxes()}
+    inboxes = {i.id: i for i in await repo.cached_inboxes()}
     for event in await repo.claim_untriaged(10):
         try:
             outcome = await process_event(event, cfg, inboxes)
@@ -598,7 +598,7 @@ async def book_from_card(event_id: str, start: datetime, user: str,
 
     # Tell the lead, like triage does after booking.
     result: dict[str, Any] = {"booked": booked, "meeting_url": b.meeting_url, "draft_id": None}
-    inbox = next((i for i in await repo.active_inboxes() if i.id == str(event["inbox_id"])), None)
+    inbox = next((i for i in await repo.cached_inboxes() if i.id == str(event["inbox_id"])), None)
     if inbox is None:
         result["note"] = "Booked. The inbox that received the reply is not active, so no confirmation was written."
         return result

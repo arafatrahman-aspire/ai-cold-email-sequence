@@ -291,11 +291,11 @@ timeline of everything sent and received.
 ### 5.1 Cold sequence
 
 ```
- enroll ─▶ intake (every 5 min) ─▶ persona ─▶ AI draft (4 emails) ─▶ validate ─┬─ ok ─▶ scheduled
+ enroll ─▶ intake (every 30 min) ─▶ persona ─▶ AI draft (4 emails) ─▶ validate ─┬─ ok ─▶ scheduled
                                                          ▲                       │
                                                          └── retry with errors ──┤ (1st failure)
                                                                                  └─▶ Needs review (2nd)
- scheduled ─▶ sender (every 3 min): kill switch → lead still contactable → not suppressed
+ scheduled ─▶ sender (every 30 min): kill switch → lead still contactable → not suppressed
               → lead's business hours → inbox daily cap → send (thread steps 2–4)
  poller (every 10 min): reply → stop sequence, alert, queue for triage
                         hard bounce / unsubscribe → suppress, stop
@@ -321,7 +321,7 @@ timeline of everything sent and received.
 
 ```
  reply arrives ─▶ poller stores it, stops the sequence, sends an alert
- triage worker (every minute):
+ triage worker (right after a poll that found mail, else every 30 min):
    1. wake snoozed leads whose "not now" period ended (fresh sequence)
    2. for each new reply: read the thread → classify (category, confidence, extracted data)
       → plan (pure rules) → act → draft an answer
@@ -360,7 +360,7 @@ examples. The **Answer library** gives it approved wording.
   invite and creates the Teams link.
 - **Reschedule**: the same appointment is moved (Teams link unchanged); its staff
   member keeps it if free, otherwise the next free one.
-- **Sync** (every 5 min): reads all appointments, including those booked by hand
+- **Sync** (every hour): reads all appointments, including those booked by hand
   on the Bookings page; a meeting that disappears is treated as cancelled.
 - **Reminder**: about 24 h before (setting *Reminder email*), a short email with
   the time in the lead's timezone, the join link, and "reply with a better time"
@@ -438,19 +438,23 @@ purpose**: an opted-out address stays blocked.
 
 | Job | Default interval | Does |
 |---|---|---|
-| `intake` | 5 min | Claim enrolled leads, draft sequences |
-| `sender` | 3 min | Send due cold emails |
+| `intake` | 30 min | Claim enrolled leads, draft sequences |
+| `sender` | 30 min | Send due cold emails |
 | `poller` | 10 min (and at start) | Read inboxes: replies, bounces, opt-outs |
-| `triage` | 1 min | Wake snoozed, triage replies, send answers |
-| `calendar` | 5 min | Read Bookings appointments into Meetings |
+| `triage` | 30 min, and right after a poll that found mail | Wake snoozed, triage replies, send answers |
+| `calendar` | 1 h | Read Bookings appointments into Meetings |
 | `reminders` | 15 min | Day-before meeting reminders |
 | `engagement` | 10 min | Brevo events: delivered/opened/clicked/bounced/spam |
-| `nurture_score` / `nurture_reconcile` | 5 min / 1 h | Score checks (enroll only if auto-enroll is on), hand-off on Hot |
-| `nurture_write` / `nurture_send` | 1 min / 1 min | Write and send nurture emails |
-| `nurture_mailbox` | 10 min | Nurture's own mailbox, if separate |
+| `nurture_score` / `nurture_reconcile` | 15 min / 1 h | Score checks (enroll only if auto-enroll is on), hand-off on Hot |
+| `nurture_write` / `nurture_send` | 15 min / 15 min | Write and send nurture emails |
+| `nurture_mailbox` | 15 min | Nurture's own mailbox, if separate |
 
 Intervals are `*_INTERVAL_SECONDS` in `.env`. `RUN_WORKERS=false` runs the API
-only; `NURTURE_WORKERS=false` turns off nurture jobs.
+only; `NURTURE_WORKERS=false` turns off nurture jobs. To keep Supabase request
+volume low, settings are cached for 30 minutes (a change saved in the console
+applies at once), the inbox list for an hour (restart the backend after
+editing `cold_email.inboxes`), and `/health` pings the database at most every
+30 minutes.
 
 ### 6.3 Swappable providers
 

@@ -39,7 +39,7 @@ async def _from() -> tuple[Optional[Inbox], Any]:
     box = await sending.sending_inbox()
     if box is not None:
         return box, sending.transport()
-    inboxes = await repo.active_inboxes()
+    inboxes = await repo.cached_inboxes()
     return (inboxes[0] if inboxes else None), get_sender()
 
 

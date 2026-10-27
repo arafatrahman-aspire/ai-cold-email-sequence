@@ -136,11 +136,12 @@ class Settings(BaseSettings):
 
     # --- Scheduler ----------------------------------------------------------
     run_workers: bool = True
-    intake_interval_seconds: int = 300
-    send_interval_seconds: int = 180
+    intake_interval_seconds: int = 1800
+    send_interval_seconds: int = 1800
     poll_interval_seconds: int = 600  # reply check: every 10 minutes
-    triage_interval_seconds: int = 60
-    calendar_sync_interval_seconds: int = 300  # pick up meetings booked through the link
+    # Also runs right after a poll that brought in mail.
+    triage_interval_seconds: int = 1800
+    calendar_sync_interval_seconds: int = 3600  # pick up meetings booked through the link
     # Day-before meeting reminders (the window is a Reply triage setting).
     reminder_interval_seconds: int = 900
     # Brevo engagement sync: opens, clicks, bounces, complaints (MAIL_SENDER=brevo).
@@ -164,10 +165,10 @@ class Settings(BaseSettings):
     # without login. Default: APP_PUBLIC_URL + "/api" (the console proxy).
     # Set it to your HTTPS subdomain once you have one.
     nurture_public_url: str = ""
-    nurture_enroll_interval_seconds: int = 300
-    nurture_generate_interval_seconds: int = 60
-    nurture_send_interval_seconds: int = 60
-    nurture_poll_interval_seconds: int = 600
+    nurture_enroll_interval_seconds: int = 900
+    nurture_generate_interval_seconds: int = 900
+    nurture_send_interval_seconds: int = 900
+    nurture_poll_interval_seconds: int = 900
     nurture_reconcile_interval_seconds: int = 3600
 
     # --- Misc ---------------------------------------------------------------

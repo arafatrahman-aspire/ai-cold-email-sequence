@@ -11,6 +11,7 @@ import asyncio
 
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -175,12 +176,28 @@ class SettingUpdate(BaseModel):
 # Routes
 # ---------------------------------------------------------------------------
 
-@app.get("/health")
-async def health() -> dict:
+# The container healthcheck calls /health every 30 seconds; the database is
+# pinged at most every half hour while it answers, every minute while it does not.
+_PING_EVERY_SECONDS = {True: 1800.0, False: 60.0}
+_last_ping: tuple[float, str] = (float("-inf"), "")
+
+
+async def _database_status() -> str:
+    global _last_ping
+    checked_at, database = _last_ping
+    if time.monotonic() - checked_at < _PING_EVERY_SECONDS[database == "ok"]:
+        return database
     try:
         database = "ok" if await repo.ping() else "error: unexpected ping reply"
     except Exception as exc:
         database = f"error: {exc}"
+    _last_ping = (time.monotonic(), database)
+    return database
+
+
+@app.get("/health")
+async def health() -> dict:
+    database = await _database_status()
 
     s = get_settings()
     return {

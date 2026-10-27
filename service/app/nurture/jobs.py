@@ -55,7 +55,7 @@ def needs_approval(cfg: dict[str, Any], source: str) -> bool:
 
 async def generate_tick(now: Optional[datetime] = None) -> dict[str, Any]:
     now = now or datetime.now(timezone.utc)
-    cfg = await options.load(fresh=True)
+    cfg = await options.load()
     if cfg["paused"]:
         return {"paused": 1}
     stats: dict[str, Any] = {}
@@ -222,7 +222,7 @@ async def send_now(message_id: str) -> str:
 
 async def send_tick(now: Optional[datetime] = None) -> dict[str, Any]:
     now = now or datetime.now(timezone.utc)
-    cfg = await options.load(fresh=True)
+    cfg = await options.load()
     if cfg["paused"]:
         return {"paused": 1}
     stats: dict[str, Any] = {}

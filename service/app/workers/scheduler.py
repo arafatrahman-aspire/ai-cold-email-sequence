@@ -41,6 +41,22 @@ def _guard(name: str, coro_fn):
     return _run
 
 
+# Poll results that are not new mail.
+_NOT_MAIL = {"error", "errors", "tracking_started", "skipped"}
+
+
+def _then_triage(coro_fn):
+    """Run a mailbox poll, then triage at once if it brought in mail, so a
+    reply does not wait for triage's own (long) interval."""
+    async def _run() -> dict:
+        stats = await coro_fn() or {}
+        if _scheduler is not None and set(stats) - _NOT_MAIL:
+            _scheduler.modify_job("triage", next_run_time=datetime.now(timezone.utc))
+        return stats
+
+    return _run
+
+
 # A job must fail this many runs in a row before anyone is emailed: one slow
 # database answer is retried a minute later and needs no human.
 ALERT_AFTER_FAILURES = 3
@@ -74,7 +90,7 @@ def _add_nurture_jobs(s) -> None:
         ("nurture_reconcile", nurture_enroll.reconcile_tick, s.nurture_reconcile_interval_seconds, None),
         ("nurture_write", nurture_jobs.generate_tick, s.nurture_generate_interval_seconds, None),
         ("nurture_send", nurture_jobs.send_tick, s.nurture_send_interval_seconds, None),
-        ("nurture_mailbox", nurture_replies.poll_tick, s.nurture_poll_interval_seconds, None),
+        ("nurture_mailbox", _then_triage(nurture_replies.poll_tick), s.nurture_poll_interval_seconds, None),
     ):
         _scheduler.add_job(
             _guard_nurture(job_id, fn),
@@ -112,9 +128,9 @@ def start() -> AsyncIOScheduler:
         misfire_grace_time=60,
     )
     # Replies: checked as soon as the service starts, then every interval
-    # (POLL_INTERVAL_SECONDS, default 10 minutes).
+    # (POLL_INTERVAL_SECONDS, default 10 minutes). New mail starts triage.
     _scheduler.add_job(
-        _guard("poller", poller.run_once),
+        _guard("poller", _then_triage(poller.run_once)),
         trigger=IntervalTrigger(seconds=s.poll_interval_seconds),
         id="poller",
         max_instances=1,

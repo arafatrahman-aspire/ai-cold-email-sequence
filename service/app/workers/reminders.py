@@ -53,7 +53,7 @@ async def run_once(now: Optional[datetime] = None) -> dict[str, int]:
     due = await repo.meetings_due_reminder(now + timedelta(hours=hours))
     if not due:
         return {}
-    inboxes = await repo.active_inboxes()
+    inboxes = await repo.cached_inboxes()
     if not inboxes:
         log.warning("meeting reminders: no active inbox to send from")
         return {"no_inbox": len(due)}

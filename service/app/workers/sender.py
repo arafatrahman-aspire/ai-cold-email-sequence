@@ -157,7 +157,7 @@ async def _run(claim, *, respect_hours: bool) -> dict[str, int]:
 
     await repo.reclaim_stuck_steps()
 
-    inboxes = await repo.active_inboxes()
+    inboxes = await repo.cached_inboxes()
     if not inboxes:
         log.warning("no active inboxes configured; nothing can be sent")
         return stats

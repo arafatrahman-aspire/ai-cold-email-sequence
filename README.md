@@ -20,12 +20,12 @@ Supabase (shared with other projects)
         ▲
         │ Supabase REST API (PostgREST) — cold_email.* functions, secret key
         ▼
-FastAPI service (Docker)  ── APScheduler ──┬── intake worker  (every 5 min)
+FastAPI service (Docker)  ── APScheduler ──┬── intake worker  (every 30 min)
                                            │     auto-enroll (if on), claim enrollments
                                            │     LangGraph: persona → draft → validate
                                            │     write emails
                                            │
-                                           ├── sender worker  (every 3 min)
+                                           ├── sender worker  (every 30 min)
                                            │     kill switch → lead status → suppression → hours → cap
                                            │     send via SMTP or Graph, record on the email
                                            │
@@ -396,7 +396,7 @@ The number is "Earlier emails the AI reads" in Reply triage → Settings.
    it without either, then restart the backend.
 3. Check it under **Reply triage → Settings → Calendar → Check free times**.
 
-**Meetings booked through the link**: every 5 minutes the calendar sync
+**Meetings booked through the link**: every hour the calendar sync
 reads the calendar's bookings. A booking by one of your leads (or anyone, for
 the Cal.com event type or Bookings service offered) appears on the Meetings page, stops
 that lead's sequence and cancels unsent replies; a cancellation puts the lead
@@ -429,7 +429,7 @@ Review, Hand-offs, Content, Settings), code in `service/app/nurture/`, tables
 `cold_email.nurture_*` (migrations 0010 and 0011, see supabase/migrations/README.md). Briefs, fallback emails and resources are stored in `cold_email.settings`; the starting text is in `service/app/nurture/content.py`.
 
 **Who joins**: a lead whose score (`public.lead_scores.tier`, else
-`leads.lead_score`) changes to Warm or Cold, checked every 5 minutes with an
+`leads.lead_score`) changes to Warm or Cold, checked every 15 minutes with an
 hourly reconciliation (there are no triggers on the shared tables). Not
 joined: unsubscribed, bounced, customers, blocked lead statuses, anyone in the
 cold sequence (one sequence at a time, enforced both ways), anyone already in
