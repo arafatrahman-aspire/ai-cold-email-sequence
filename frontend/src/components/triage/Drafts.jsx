@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api.js'
 import { CATEGORIES, DRAFT_KINDS, relativeTime, shortDateTime } from '../../labels.js'
-import { AutoTextarea, Badge, Card, ErrorNote, Field, Modal, Spinner, toast, useAction } from '../ui.jsx'
+import { AutoTextarea, Badge, Card, ErrorNote, Field, Modal, Spinner, toast, useAction, useAutoRefresh } from '../ui.jsx'
 import { LeadLink } from '../LeadJourney.jsx'
 import EmailPreview from '../EmailPreview.jsx'
 
@@ -231,12 +231,7 @@ export default function Drafts() {
   const now = useNow()
   const [{ busy, error }, load] = useAction(async () => setDrafts((await api.drafts(filter)).drafts || []))
 
-  useEffect(() => {
-    load()
-    const id = setInterval(load, 30_000)
-    return () => clearInterval(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter])
+  useAutoRefresh(load, [filter])
 
   return (
     <div className="stack">

@@ -7,9 +7,7 @@ import {
   formatNumber,
 } from '../labels.js'
 import NeedsAttention from './NeedsAttention.jsx'
-import { Badge, Card, ErrorNote, ReplyCheckSchedule, Spinner, useAction, useIsAdmin } from './ui.jsx'
-
-const REFRESH_MS = 30_000
+import { Badge, Card, ErrorNote, ReplyCheckSchedule, Spinner, useAction, useAutoRefresh, useIsAdmin } from './ui.jsx'
 
 export function StatTile({ label, value, note }) {
   return (
@@ -264,11 +262,7 @@ export default function Dashboard({ health, onRefreshHealth }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    refresh()
-    const id = setInterval(refresh, REFRESH_MS)
-    return () => clearInterval(id)
-  }, [refresh])
+  useAutoRefresh(refresh)
 
   const enr = stats?.enrollments || {}
   const emails = stats?.emails || {}
@@ -286,9 +280,9 @@ export default function Dashboard({ health, onRefreshHealth }) {
           <h1>Overview</h1>
           <p className="muted">
             {updated
-              ? `Updated ${updated.toLocaleTimeString()} · refreshes every 30s`
+              ? `Updated ${updated.toLocaleTimeString()} · refreshes every 5 min`
               : error
-                ? 'Not loaded yet · retrying every 30s'
+                ? 'Not loaded yet · retrying every 5 min'
                 : 'Loading…'}
           </p>
         </div>

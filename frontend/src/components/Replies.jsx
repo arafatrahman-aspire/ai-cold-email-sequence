@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { PERSONAS } from '../labels.js'
-import { Badge, Card, ErrorNote, Field, Spinner, useAction, toast } from './ui.jsx'
+import { Badge, Card, ErrorNote, Field, Spinner, useAction, useAutoRefresh, toast } from './ui.jsx'
 
 const FILTERS = [
   ['reply', 'Replies'],
@@ -138,12 +138,7 @@ export default function Replies() {
     setReplies((await api.replies(type)).replies || [])
   })
 
-  useEffect(() => {
-    load(filter)
-    const id = setInterval(() => load(filter), 60_000)
-    return () => clearInterval(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter])
+  useAutoRefresh(() => load(filter), [filter])
 
   const missing = error?.message?.includes('list_inbox_events')
 

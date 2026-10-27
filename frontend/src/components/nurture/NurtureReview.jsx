@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api.js'
 import { EXIT_REASONS, MESSAGE_STATUS, NURTURE_PERSONAS, relativeTime, shortDateTime, TEMPERATURES } from '../../labels.js'
-import { AutoTextarea, Badge, Card, ErrorNote, Spinner, useAction, useIsAdmin, confirmDialog } from '../ui.jsx'
+import { AutoTextarea, Badge, Card, ErrorNote, Spinner, useAction, useAutoRefresh, useIsAdmin, confirmDialog } from '../ui.jsx'
 import { LeadLink } from '../LeadJourney.jsx'
 import AiBanner from './AiBanner.jsx'
 import EmailPreview from '../EmailPreview.jsx'
@@ -101,12 +101,7 @@ export default function NurtureReview() {
     setMode(s.settings.approval)
     setDev(st.environment === 'dev')
   })
-  useEffect(() => {
-    load()
-    const id = setInterval(load, 60_000)
-    return () => clearInterval(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  useAutoRefresh(load)
   const waiting = (messages || []).filter((m) => m.status === 'needs_approval')
   const upcoming = (messages || []).filter((m) => m.status !== 'needs_approval')
   const modeText = !mode ? '' : mode.mode === 'all' ? 'Pilot mode: every AI draft waits for approval.'

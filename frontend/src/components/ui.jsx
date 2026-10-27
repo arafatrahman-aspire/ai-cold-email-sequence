@@ -84,6 +84,38 @@ export function useAction(fn) {
   return [state, run]
 }
 
+// Auto-refresh pages every 5 minutes, and never while the tab is hidden (a
+// forgotten tab would otherwise query the database all day). Coming back to
+// the tab refreshes at once if the data is over 30 seconds old.
+export const AUTO_REFRESH_MS = 5 * 60_000
+const RETURN_REFRESH_MS = 30_000
+
+export function useAutoRefresh(fn, deps = []) {
+  const fnRef = useRef(fn)
+  fnRef.current = fn
+  useEffect(() => {
+    let timer
+    let last = 0
+    const run = () => {
+      last = Date.now()
+      clearTimeout(timer)
+      // A tick while hidden does nothing; the return to the tab catches up.
+      timer = setTimeout(() => { if (!document.hidden) run() }, AUTO_REFRESH_MS)
+      fnRef.current()
+    }
+    const onVisibility = () => {
+      if (!document.hidden && Date.now() - last >= RETURN_REFRESH_MS) run()
+    }
+    run()
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+}
+
 export function Field({ label, hint, children }) {
   return (
     <label className="field">

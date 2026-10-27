@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api.js'
 import { CATEGORIES, CATEGORY_ORDER, TRIAGE_STATUS, formatNumber, relativeTime, shortDateTime } from '../../labels.js'
 import { StatTile } from '../Dashboard.jsx'
-import { Badge, ErrorNote, ReplyCheckSchedule, Spinner, useAction, confirmDialog, toast } from '../ui.jsx'
+import { Badge, ErrorNote, ReplyCheckSchedule, Spinner, useAction, useAutoRefresh, confirmDialog, toast } from '../ui.jsx'
 import { LeadLink } from '../LeadJourney.jsx'
 import { DraftCard } from './Drafts.jsx'
 
@@ -348,12 +348,7 @@ export default function TriageReplies() {
   })
 
   const refresh = useCallback(() => load(), [load])
-  useEffect(() => {
-    load()
-    const id = setInterval(load, 30_000)
-    return () => clearInterval(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  useAutoRefresh(load)
 
   const all = replies || []
   const counts = { all: all.length, needs_human: all.filter((r) => needsYou(r, drafts[r.id])).length }

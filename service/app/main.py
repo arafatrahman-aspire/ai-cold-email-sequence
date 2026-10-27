@@ -785,7 +785,7 @@ async def stats() -> dict:
 
 @app.get("/settings", dependencies=[Depends(require_user)])
 async def read_settings() -> dict:
-    return {"settings": await repo.get_settings()}
+    return {"settings": await settings_store.all_rows()}
 
 
 @app.put("/settings/{key}", dependencies=[Depends(require_admin)])

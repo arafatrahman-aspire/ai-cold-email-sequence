@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from app import regions, repository as repo
@@ -18,6 +19,7 @@ log = logging.getLogger(__name__)
 
 _CACHE_TTL_SECONDS = 1800.0
 _cache: dict[str, Any] = {}
+_rows: list[dict[str, Any]] = []  # the full rows, for the console's settings list
 _cache_loaded_at: float = 0.0
 
 DEFAULTS: dict[str, Any] = {
@@ -87,7 +89,7 @@ async def refresh() -> None:
     to DEFAULTS. A transient database blip should slow the system down, not
     crash a worker tick.
     """
-    global _cache, _cache_loaded_at
+    global _cache, _rows, _cache_loaded_at
     try:
         rows = await repo.get_settings()
     except Exception as exc:
@@ -97,7 +99,19 @@ async def refresh() -> None:
         _cache_loaded_at = time.monotonic() - _CACHE_TTL_SECONDS + 60.0
         return
     _cache = {r["key"]: r["value"] for r in rows}
+    _rows = [dict(r) for r in rows]
     _cache_loaded_at = time.monotonic()
+
+
+async def all_rows() -> list[dict[str, Any]]:
+    """Every stored setting (key, value, description, updated_at), from the
+    cache. Until the first successful load, straight from the database, so a
+    database error reaches the caller rather than an empty list."""
+    if time.monotonic() - _cache_loaded_at > _CACHE_TTL_SECONDS:
+        await refresh()
+    if not _rows:
+        return await repo.get_settings()
+    return [dict(r) for r in _rows]
 
 
 async def get(key: str) -> Any:
@@ -113,6 +127,19 @@ async def get(key: str) -> Any:
 async def set_value(key: str, value: Any, description: str | None = None) -> None:
     await repo.set_setting(key, value, description)
     _cache[key] = value
+    # The same change set_setting made to the row. Nothing loaded yet: the
+    # next read loads every row, this one included.
+    if not _rows:
+        return
+    row = next((r for r in _rows if r["key"] == key), None)
+    if row is None:
+        row = {"key": key, "description": None}
+        _rows.append(row)
+        _rows.sort(key=lambda r: r["key"])
+    row["value"] = value
+    if description is not None:
+        row["description"] = description
+    row["updated_at"] = datetime.now(timezone.utc).isoformat()
 
 
 @dataclass(frozen=True)
